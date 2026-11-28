@@ -528,7 +528,7 @@ class WarmSupertonicServer extends ResidentService {
             this.ok = true;
             this._markReady();
             if (warmup) {
-                try { await this.synthesize("Damar.", { voice: "supertonic-M1" }); } catch { /* abaikan */ }
+                try { await this.synthesize("Damar.", { voice: "supertonic-M2" }); } catch { /* abaikan */ }
             }
             return this;
         })();
@@ -545,7 +545,7 @@ class WarmSupertonicServer extends ResidentService {
         } catch { return false; }
     }
 
-    async _synthesizeOnce(text, { voice = "supertonic-M1", steps = 5, timeoutMs = 120000, fx } = {}) {
+    async _synthesizeOnce(text, { voice = "supertonic-M2", steps = 5, timeoutMs = 120000, fx } = {}) {
         const preset = supertonicPreset(voice) || "M1";
         // fx: undefined = ambil dari config voice; null = paksa tanpa FX;
         // objek { pitch_semitones, style, fx } = override per panggilan.
@@ -566,7 +566,7 @@ class WarmSupertonicServer extends ResidentService {
         return { audio, ms: Date.now() - t0, voice: `supertonic-${preset}`, ...(Number.isFinite(fxMs) && fxMs > 0 ? { fxMs } : {}) };
     }
 
-    async synthesize(text, { voice = "supertonic-M1", steps = 5, timeoutMs = 120000, fx } = {}) {
+    async synthesize(text, { voice = "supertonic-M2", steps = 5, timeoutMs = 120000, fx } = {}) {
         if (!this.ok && !this.proc) throw new Error("supertonic service belum jalan");
         try {
             return await this._synthesizeOnce(text, { voice, steps, timeoutMs, fx });

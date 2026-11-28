@@ -123,7 +123,7 @@ function createVoiceLocalServer(opts = {}) {
     const ttsQueue = serialQueue();
     const log = opts.log || (() => {});
     const defaultSttModel = opts.defaultSttModel || "ggml-small";
-    const defaultTtsVoice = opts.defaultTtsVoice || "supertonic-M1";
+    const defaultTtsVoice = opts.defaultTtsVoice || "supertonic-M2";
     // Model resident (hangat): satu WarmWhisperServer per model yang diminta.
     // opts.warm: false = matikan; selain itu daftar {model, port}.
     // HANYA tiny yang dihangatkan: terukur di Aether (whisper-server v1.7.6),
