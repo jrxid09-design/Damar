@@ -410,7 +410,7 @@
   // ==========================================================================
   var state = {
     activeView: 'overview', sidebarCollapsed: false, mobileDrawerOpen: false, capabilityFilter: 'Tools',
-    core: {}, models: {}, loaded: false, endpoint: '', usage: {}, checkpoints: {}, memory: null, settings: null, diagnostics: null,
+    core: {}, models: {}, loaded: false, endpoint: '', usage: {}, checkpoints: {}, memory: null, settings: null, diagnostics: null, kapabilitas: null,
     control: { id: null, client: null, held: {} }, workspace: ''
   };
   var core = null;
@@ -615,23 +615,44 @@
 
   function renderCapabilitiesView(forced) {
     var tab = forced || state.capabilityFilter || 'Tools';
-    var html = pageHeader('AI INFRASTRUCTURE • CAPABILITIES', 'Capabilities Hub', 'Tools, plugins, agents and MCP servers registered in DAMAR Core (read-only console routes; secrets redacted).',
+    var html = pageHeader('AI INFRASTRUCTURE • CAPABILITIES', 'Capabilities Hub', 'Kelola tool, plugin, agen, skill, dan server MCP yang terdaftar di DAMAR Core. Penambahan dan penghapusan berjalan lewat registry dan loader kanonis Core; rahasia tidak pernah ditampilkan.',
       '<div class="segmented-tabs">' + ['Tools', 'Plugins', 'Agents', 'Skills', 'MCP'].map(function (t) { return '<button type="button" class="seg-tab' + (t === tab ? ' active' : '') + '" data-cap-tab="' + t + '">' + escapeHtml(L(t)) + '</button>'; }).join('') + '</div>');
     var body;
     if (tab === 'Tools') { var t = LIVE.d('tools'); body = t ? table(['Tool', 'Plugin', 'Description'], t.tools.map(function (x) { return [mono(x.id), escapeHtml(x.pluginId), '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(x.description) + '</span>']; })) : readState('tools', 'tools'); }
-    else if (tab === 'Plugins') { var p = LIVE.d('plugins'); body = p ? table(['Plugin', 'Version', 'Category', 'Tools', 'Permissions', 'Description'], p.plugins.map(function (x) { return ['<span style="color:var(--text-ivory);font-weight:600;">' + escapeHtml(x.name) + '</span>', mono(x.version), escapeHtml(x.category), '<span class="td-num">' + num(x.toolCount) + '</span>', escapeHtml((x.permissions || []).join(', ') || '-'), '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(x.description) + '</span>']; })) : readState('plugins', 'plugins'); }
+    else if (tab === 'Plugins') {
+      var kapP = state.kapabilitas; if (!kapP) ensureKapabilitas();
+      var addBarP = '<div style="display:flex;justify-content:flex-end;margin:0 0 10px;">' + btn('+ Pasang plugin…', 'data-kap-plugin-add="1"', 'btn-primary') + '</div>';
+      if (kapP && kapP.ok) {
+        body = addBarP + table(['Plugin', 'Versi', 'Sumber', 'Status', 'Tool', ''], kapP.data.plugins.items.map(function (x) {
+          var status = x.loaded ? statusBadgeHtml('ACTIVE', 'Dimuat') : (x.valid === false ? statusBadgeHtml('ERROR', 'Manifest tidak valid') : statusBadgeHtml('DISABLED', 'Tidak dimuat'));
+          var acts = x.source === 'user' && x.id ? btn(x.loaded ? 'Nonaktifkan' : 'Aktifkan', 'data-kap-plugin-toggle="' + escapeHtml(x.id) + '" data-enabled="' + (x.loaded ? 'true' : 'false') + '"') + ' ' + btn('Hapus', 'data-kap-plugin-remove="' + escapeHtml(x.id) + '"', 'btn-danger') : '<span style="font-size:11.5px;color:var(--text-muted);">' + escapeHtml(L('Bawaan Core')) + '</span>';
+          return ['<span style="color:var(--text-ivory);font-weight:600;">' + escapeHtml(x.name) + '</span>', mono(x.version || '-'), escapeHtml(x.source === 'user' ? L('Pengguna') : L('Bawaan')), status, '<span class="td-num">' + num(x.toolCount) + '</span>', acts];
+        }), 'Belum ada plugin yang terdaftar di Core.') + (kapP.data.plugins.items.some(function (x) { return x.valid === false; }) ? '<p style="padding:10px 14px;font-size:12px;color:var(--text-secondary);">' + escapeHtml(L('Plugin bertanda manifest tidak valid terpasang di folder pengguna tetapi ditolak loader. Hapus dari daftar di atas atau perbaiki manifestnya.')) + '</p>' : '');
+      } else { var p = LIVE.d('plugins'); body = addBarP + (kapP && !kapP.ok ? '<div style="padding:10px 14px;font-size:12px;">' + statusBadgeHtml('ERROR', kapP.error) + '</div>' : '') + (p ? table(['Plugin', 'Version', 'Category', 'Tools', 'Permissions', 'Description'], p.plugins.map(function (x) { return ['<span style="color:var(--text-ivory);font-weight:600;">' + escapeHtml(x.name) + '</span>', mono(x.version), escapeHtml(x.category), '<span class="td-num">' + num(x.toolCount) + '</span>', escapeHtml((x.permissions || []).join(', ') || '-'), '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(x.description) + '</span>']; })) : readState('plugins', 'plugins')); }
+    }
     else if (tab === 'Agents') { var a = LIVE.d('agents'); body = a ? table(['Agent', 'Kind', 'Online', 'Description'], a.agents.map(function (x) { return ['<span style="color:var(--damar-gold-bright);font-weight:700;">' + escapeHtml(x.label || x.id) + '</span>', escapeHtml(x.kind), statusBadgeHtml(x.online ? 'ONLINE' : 'OFFLINE'), '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(shortRole(x)) + '</span>']; })) : readState('agents', 'agents'); }
     else if (tab === 'MCP') {
       var m = LIVE.d('mcp');
-      body = m ? kvList([kv('DAMAR MCP server', m.server ? m.server.name : '-'), kv('Exposed tools', m.server ? m.server.exposed + ' of ' + m.server.total + (m.server.destructiveHidden ? ' (destructive hidden)' : '') : '-'), kv('Client servers running', m.clients ? m.clients.running + ' running, ' + m.clients.bridged + ' bridged' : '-')]) +
-        '<div style="margin-top:12px;">' + table(['Server', 'Transport / command', 'State', 'Environment'], (m.servers || []).map(function (x) {
-          return [escapeHtml(x.name || x.id), mono(x.command || x.url || x.transport || '-'), statusBadgeHtml(x.running ? 'RUNNING' : x.enabled === false ? 'DISABLED' : 'IDLE'), escapeHtml(x.env ? Object.keys(x.env).map(function (k) { return k + '=' + REDACTED; }).join(', ') : '-')];
-        }), 'No MCP client servers configured in Core.') + '</div>' : readState('mcp', 'MCP servers');
+      var kapM = state.kapabilitas; if (!kapM) ensureKapabilitas();
+      var addBarM = '<div style="display:flex;justify-content:flex-end;margin:10px 0 0;">' + btn('+ Tambah server MCP…', 'data-kap-mcp-add="1"', 'btn-primary') + '</div>';
+      var noteM = '<p style="padding:10px 14px;font-size:12px;color:var(--text-secondary);">' + escapeHtml(L('Registry MCP Damar memakai transport stdio: server adalah proses lokal yang dijalankan Core lewat perintahnya. Server yang tersimpan langsung dijalankan; registry tidak memiliki status nonaktif, jadi menonaktifkan server berarti menghapusnya dari registry.')) + '</p>';
+      var srvTable;
+      if (kapM && kapM.ok) srvTable = table(['Server', 'Perintah', 'Status', 'Tool', ''], kapM.data.mcp.servers.map(function (x) {
+        return ['<span style="color:var(--text-ivory);font-weight:600;">' + escapeHtml(x.id) + '</span>', mono(x.command + (x.args && x.args.length ? ' ' + x.args.join(' ') : '')), statusBadgeHtml(x.running ? 'RUNNING' : 'IDLE', x.running ? 'Berjalan' : 'Terkonfigurasi'), escapeHtml((x.tools || []).join(', ') || (x.lastError ? String(x.lastError) : '-')), btn('Hapus', 'data-kap-mcp-remove="' + escapeHtml(x.id) + '"', 'btn-danger')];
+      }), 'Belum ada server MCP klien yang terkonfigurasi di Core.');
+      else srvTable = m ? table(['Server', 'Transport / command', 'State', 'Environment'], (m.servers || []).map(function (x) {
+        return [escapeHtml(x.name || x.id), mono(x.command || x.url || x.transport || '-'), statusBadgeHtml(x.online ? 'RUNNING' : 'IDLE'), escapeHtml(x.env ? Object.keys(x.env).map(function (k) { return k + '=' + REDACTED; }).join(', ') : '-')];
+      }), 'No MCP client servers configured in Core.') : readState('mcp', 'MCP servers');
+      body = (m ? kvList([kv('DAMAR MCP server', m.server ? m.server.name : '-'), kv('Exposed tools', m.server ? m.server.exposed + ' of ' + m.server.total + (m.server.destructiveHidden ? ' (destructive hidden)' : '') : '-'), kv('Client servers running', m.clients ? m.clients.running + ' running, ' + m.clients.bridged + ' bridged' : '-')]) : '') + addBarM + '<div style="margin-top:12px;">' + srvTable + '</div>' + noteM;
     } else {
       var st = state.settings;
       if (!st) ensureSettings();
-      body = st && st.ok ? table(['Skill', 'Source', 'Enabled', 'Triggers'], (st.data.availableSkills || []).map(function (x) { return [escapeHtml(x.name), escapeHtml(x.source), statusBadgeHtml(x.enabled ? 'ACTIVE' : 'DISABLED'), escapeHtml((x.triggers || []).join(', '))]; }), 'No skills installed.')
-        : '<div style="padding:14px;font-size:12px;color:var(--text-secondary);">' + escapeHtml(L(st ? 'Gagal membaca skill dari Core.' : 'Memuat skill dari Core…')) + ' ' + (st ? statusBadgeHtml('ERROR', st.error) : '') + '</div>';
+      var addBarS = '<div style="display:flex;justify-content:flex-end;margin:0 0 10px;">' + btn('+ Impor skill…', 'data-kap-skill-add="1"', 'btn-primary') + '</div>';
+      body = addBarS + (st && st.ok ? table(['Skill', 'Source', 'Enabled', 'Triggers', ''], (st.data.availableSkills || []).map(function (x) {
+        var acts = btn(x.enabled ? 'Nonaktifkan' : 'Aktifkan', 'data-kap-skill-toggle="' + escapeHtml(x.name) + '" data-enabled="' + (x.enabled ? 'true' : 'false') + '"') + (x.source === 'profile' ? ' ' + btn('Hapus', 'data-kap-skill-remove="' + escapeHtml(x.name) + '"', 'btn-danger') : '');
+        return [escapeHtml(x.name), escapeHtml(x.source), statusBadgeHtml(x.enabled ? 'ACTIVE' : 'DISABLED'), escapeHtml((x.triggers || []).join(', ')), acts];
+      }), 'No skills installed.')
+        : '<div style="padding:14px;font-size:12px;color:var(--text-secondary);">' + escapeHtml(L(st ? 'Gagal membaca skill dari Core.' : 'Memuat skill dari Core…')) + ' ' + (st ? statusBadgeHtml('ERROR', st.error) : '') + '</div>');
     }
     return html + panel(tab, body, { flush: true });
   }
@@ -1100,6 +1121,29 @@
       .then(function (r) { state.settings = r; }, function (r) { state.settings = r && r.error ? r : { ok: false, error: 'CONTROL_SESSION_FAILED' }; }).then(renderAll);
   }
 
+  // Pusat Kapabilitas management state (MCP servers, plugins, profile skills)
+  // from the Owner-only kapabilitas binding; loaded on open like settings.
+  function loadKapabilitas() {
+    return core.get('/api/r9/kapabilitas')
+      .then(function (r) { state.kapabilitas = r; }, function (r) { state.kapabilitas = r && r.error ? r : { ok: false, error: 'KAPABILITAS_READ_FAILED' }; }).then(renderAll);
+  }
+  function ensureKapabilitas() {
+    if (state.kapabilitas || state.kapabilitasLoading) return;
+    state.kapabilitasLoading = true;
+    loadKapabilitas().then(function () { state.kapabilitasLoading = false; }, function () { state.kapabilitasLoading = false; });
+  }
+  // The guided MCP form's fields -> the registry entry shape configStore accepts.
+  function kapMcpEntry() {
+    var env = {};
+    val('kmEnv').split(/\r?\n/).forEach(function (line) { var i = line.indexOf('='); if (i > 0) env[line.slice(0, i).trim()] = line.slice(i + 1).trim(); });
+    var tools = val('kmTools') ? val('kmTools').split(',').map(function (s) { return s.trim(); }).filter(Boolean) : null;
+    var entry = { id: val('kmId'), command: val('kmCommand'), args: val('kmArgs') };
+    if (val('kmCwd')) entry.cwd = val('kmCwd');
+    if (Object.keys(env).length) entry.env = env;
+    if (tools) entry.allowedTools = tools;
+    return entry;
+  }
+
   // Settings back several pages (Pengaturan itself, the Skills tab, the Keamanan autonomy line): like every
   // other page they load on open instead of waiting for a manual "load" click. One request in flight at most.
   function ensureSettings() {
@@ -1452,7 +1496,73 @@
     },
     'data-undo': function (id) { checkpointRun(id, 'undo'); },
     'data-redo': function (id) { checkpointRun(id, 'redo'); },
-    'data-cap-tab': function (t) { state.capabilityFilter = t; if (t === 'Skills' && !state.settings) loadSettings(); renderAll(); },
+    'data-cap-tab': function (t) { state.capabilityFilter = t; if (t === 'Skills' && !state.settings) loadSettings(); if (t === 'MCP' || t === 'Plugins') ensureKapabilitas(); renderAll(); },
+    'data-kap-mcp-add': function () {
+      ownerAction('Tambah server MCP',
+        field('kmId', 'ID server (huruf kecil, angka, strip, atau garis bawah)', '<input type="text" class="input-field" id="kmId" style="width:100%;font-family:var(--font-mono);" maxlength="40" />') +
+        field('kmCommand', 'Perintah (transport stdio: proses lokal yang dijalankan Core)', '<input type="text" class="input-field" id="kmCommand" style="width:100%;font-family:var(--font-mono);" />') +
+        field('kmArgs', 'Argumen (pisahkan dengan spasi)', '<input type="text" class="input-field" id="kmArgs" style="width:100%;font-family:var(--font-mono);" />') +
+        field('kmCwd', 'Direktori kerja (opsional)', '<input type="text" class="input-field" id="kmCwd" style="width:100%;font-family:var(--font-mono);" />') +
+        field('kmEnv', 'Variabel lingkungan (opsional, satu KUNCI=nilai per baris; nilai disimpan Core dan tidak ditampilkan lagi)', '<textarea class="input-field" id="kmEnv" rows="3" style="width:100%;font-family:var(--font-mono);" autocomplete="off"></textarea>') +
+        field('kmTools', 'Tool yang diizinkan (opsional, pisahkan dengan koma; kosong berarti semua tool server)', '<input type="text" class="input-field" id="kmTools" style="width:100%;font-family:var(--font-mono);" />') +
+        '<div style="display:flex;justify-content:flex-end;margin-top:4px;">' + btn('Tes koneksi', 'id="kmTestBtn"') + '</div>' +
+        '<div id="kmTestResult" style="font-size:12px;margin-top:8px;color:var(--text-secondary);"></div>',
+        function () { return core.post('/api/r9/kapabilitas/mcp/save', { entry: kapMcpEntry() }).then(function (r) { if (r.ok) loadKapabilitas(); return r; }); },
+        'Tes koneksi menjalankan handshake MCP sungguhan tanpa menyimpan apa pun. Simpan menulis entri ke registry MCP kanonis Core lalu menjalankan servernya.');
+      var tb = document.getElementById('kmTestBtn');
+      if (tb) tb.onclick = function () {
+        var out = document.getElementById('kmTestResult'); if (out) out.textContent = L('Menghubungi server…');
+        core.post('/api/r9/kapabilitas/mcp/test', { entry: kapMcpEntry() }).then(function (r) {
+          if (!out) return;
+          if (!r.ok) { out.textContent = describeFailure(r); return; }
+          out.textContent = r.data.ok ? L('Koneksi berhasil. Tool yang dilaporkan server: ') + ((r.data.tools || []).join(', ') || '-') + ' (' + r.data.latencyMs + ' ms)' : L('Koneksi gagal: ') + r.data.error;
+        }, function (e) { if (out) out.textContent = 'Control error: ' + String(e && e.message || e); });
+      };
+    },
+    'data-kap-mcp-remove': function (id) {
+      ownerAction('Hapus server MCP', '<p style="font-size:12.5px;">' + escapeHtml(L('Hapus server MCP')) + ' <strong>' + escapeHtml(id) + '</strong> ' + escapeHtml(L('dari registry Core? Server dihentikan dan toolnya hilang dari daftar tool.')) + '</p>', function () {
+        return core.post('/api/r9/kapabilitas/mcp/remove', { id: id }).then(function (r) { if (r.ok) loadKapabilitas(); return r; });
+      });
+    },
+    'data-kap-plugin-add': function () {
+      ownerAction('Pasang plugin',
+        field('kpSource', 'Sumber', '<select class="select-field" id="kpSource" style="width:100%;"><option value="folder">Folder lokal</option><option value="zip">Berkas zip</option><option value="git">URL git</option></select>') +
+        field('kpPath', 'Jalur folder, jalur berkas zip, atau URL git', '<input type="text" class="input-field" id="kpPath" style="width:100%;font-family:var(--font-mono);" />'),
+        function () { return core.post('/api/r9/kapabilitas/plugins/install', { source: val('kpSource'), path: val('kpPath') }).then(function (r) { if (r.ok) loadKapabilitas(); return r; }); },
+        'Plugin divalidasi dengan validator loader Damar (manifest.json wajib berisi id, name, version, entry), disalin ke folder plugin pengguna, lalu dimuat langsung. Plugin yang tidak valid ditolak dengan alasannya.');
+    },
+    'data-kap-plugin-toggle': function (id, el) {
+      var on = el.getAttribute('data-enabled') === 'true';
+      ownerAction(on ? 'Nonaktifkan plugin' : 'Aktifkan plugin', '<p style="font-size:12.5px;">' + escapeHtml(L(on ? 'Lepas plugin ini dari sesi Core yang berjalan? Foldernya tetap terpasang dan plugin dimuat lagi saat Core dimulai ulang.' : 'Muat plugin ini ke sesi Core yang berjalan?')) + ' <strong>' + escapeHtml(id) + '</strong></p>', function () {
+        return core.post('/api/r9/kapabilitas/plugins/enabled', { id: id, enabled: !on }).then(function (r) { if (r.ok) loadKapabilitas(); return r; });
+      });
+    },
+    'data-kap-plugin-remove': function (id) {
+      ownerAction('Hapus plugin', '<p style="font-size:12.5px;">' + escapeHtml(L('Hapus plugin')) + ' <strong>' + escapeHtml(id) + '</strong> ' + escapeHtml(L('dari folder plugin pengguna? Plugin dilepas dari sesi dan foldernya dihapus.')) + '</p>', function () {
+        return core.post('/api/r9/kapabilitas/plugins/remove', { id: id }).then(function (r) { if (r.ok) loadKapabilitas(); return r; });
+      });
+    },
+    'data-kap-skill-add': function () {
+      ownerAction('Impor skill',
+        field('ksSource', 'Sumber', '<select class="select-field" id="ksSource" style="width:100%;"><option value="folder">Folder lokal</option><option value="zip">Berkas zip</option></select>') +
+        field('ksPath', 'Jalur folder atau berkas zip', '<input type="text" class="input-field" id="ksPath" style="width:100%;font-family:var(--font-mono);" />'),
+        function () { return core.post('/api/r9/kapabilitas/skills/import', { source: val('ksSource'), path: val('ksPath') }).then(function (r) { if (r.ok) { loadKapabilitas(); loadSettings(); } return r; }); },
+        'Folder skill wajib berisi SKILL.md dengan front matter (name, description, triggers). Skill disalin ke folder skill profil Core dan langsung terbaca di daftar skill.');
+    },
+    'data-kap-skill-toggle': function (name, el) {
+      var on = el.getAttribute('data-enabled') === 'true';
+      var st = state.settings; if (!st || !st.ok) return;
+      var disabled = (st.data.skills.disabled || []).slice();
+      disabled = on ? disabled.concat([name]) : disabled.filter(function (n) { return n !== name; });
+      ownerAction(on ? 'Nonaktifkan skill' : 'Aktifkan skill', '<p style="font-size:12.5px;">' + escapeHtml(L(on ? 'Nonaktifkan skill ini untuk routing Core?' : 'Aktifkan kembali skill ini untuk routing Core?')) + ' <strong>' + escapeHtml(name) + '</strong></p>', function () {
+        return controlSession().then(function (id) { return core.post('/api/r9/settings', { action: 'update', cliSession: id, client: state.control.client, values: { skills: { disabled: disabled } } }); }).then(function (r) { if (r.ok) { loadSettings(); loadKapabilitas(); } return r; });
+      });
+    },
+    'data-kap-skill-remove': function (name) {
+      ownerAction('Hapus skill', '<p style="font-size:12.5px;">' + escapeHtml(L('Hapus skill')) + ' <strong>' + escapeHtml(name) + '</strong> ' + escapeHtml(L('dari folder skill profil Core? Foldernya dihapus.')) + '</p>', function () {
+        return core.post('/api/r9/kapabilitas/skills/remove', { name: name }).then(function (r) { if (r.ok) { loadKapabilitas(); loadSettings(); } return r; });
+      });
+    },
     'data-run-diagnostics': function () { refresh().then(renderAll); },
     'data-jump-view': function (v) { navigateTo(v); },
     // Provider steps are delegated to whatever the provider views expose: DamarControl.onboarding = { connect(), grant() }.

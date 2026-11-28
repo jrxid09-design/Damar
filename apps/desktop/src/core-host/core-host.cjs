@@ -455,6 +455,10 @@ async function child(directory, resume, recovered = false) {
       // single automation service (the daily WhatsApp brief). Composition
       // only; the service itself is never composed here.
       otomasi: require('./otomasi.cjs').createOtomasiBinding({ installRoot: path.resolve(CANDIDATE, '..', '..') }),
+      // Pusat Kapabilitas binding: guided Add flows over the canonical MCP
+      // registry + client manager, the canonical plugin loader, and the
+      // profile skills directory. Composition only; those owners stay single.
+      kapabilitas: require('./kapabilitas.cjs').createKapabilitasBinding({ copyRoot, settingsFile, settings: coreSettings }),
       mataDewa: require('../mata-dewa/index.cjs').createMataDewa({ proactiveAutostart: true, settings: coreSettings, keyStore, cacheFile: path.join(directory, 'mata-dewa-cache.json'), profileDir: path.join(path.dirname(settingsFile), 'mata-dewa'), python, alprDir: path.join(SCRATCH, 'alpr'), // installed: %LOCALAPPDATA%\DAMAR\alpr
         dinov3Dir: path.join(SCRATCH, 'dinov3'), // installed: %LOCALAPPDATA%\DAMAR\dinov3 (DINOv3 change-detection engine, ALPR pattern)
         // VLM verification for DINOv3 change candidates: bounded vision completions through the provider router;

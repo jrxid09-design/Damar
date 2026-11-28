@@ -32,7 +32,7 @@ function readJsonl(file) {
 const tokenEq = (a, b) => typeof a === 'string' && typeof b === 'string' && crypto.timingSafeEqual(crypto.createHash('sha256').update(a).digest(), crypto.createHash('sha256').update(b).digest());
 const clean = (s, n) => String(s ?? '').replace(/[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, ' ').slice(0, n);
 
-function createR9Routes({ directory, credentials, hub, registry, canonicalUsageToday, turns = null, sandbox = () => null, checkpoints = null, memory = null, settings = null, budget = null, lifecycle = null, jobSnapshot = () => null, modelGrants = null, mataDewa = null, team = null, providerAdmin = null, media = null, oauthLogin = null, onboardingChat = null, cyber = null, otomasi = null, parallelRuns = 3 }) {
+function createR9Routes({ directory, credentials, hub, registry, canonicalUsageToday, turns = null, sandbox = () => null, checkpoints = null, memory = null, settings = null, budget = null, lifecycle = null, jobSnapshot = () => null, modelGrants = null, mataDewa = null, team = null, providerAdmin = null, media = null, oauthLogin = null, onboardingChat = null, cyber = null, otomasi = null, kapabilitas = null, parallelRuns = 3 }) {
   if (!Number.isSafeInteger(parallelRuns) || parallelRuns < 1 || parallelRuns > 3) throw Error('PANDAWA_PARALLEL_INVALID');
   const runsFile = path.join(directory, 'pandawa-runs.jsonl'), receiptsFile = path.join(directory, 'usage-receipts.jsonl');
   const runs = new Map(), byRequest = new Map(), receipts = new Map();
@@ -313,6 +313,31 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
         const data = otomasi ? await otomasi.daemonStatus().catch(() => ({ available: false, reason: 'DAEMON_TIDAK_TERJANGKAU' }))
           : { available: false, reason: 'BINDING_TIDAK_TERSEDIA' };
         return json(200, { success: true, data: { ...data, generatedAt: Date.now() } });
+      }
+      // Pusat Kapabilitas (Owner order 2026-11-27: the capability center must
+      // not stay read-only): guided Add flows for MCP client servers, plugins
+      // and skills. Every write goes through the kapabilitas binding, which
+      // composes the canonical owners in this process (MCP configStore +
+      // mcpClientManager, the plugin loader, the profile skills directory);
+      // nothing here invents a second registry or bypasses those owners.
+      // Owner only, like every other configuration write in this layer.
+      if (p === '/api/r9/kapabilitas' || p.startsWith('/api/r9/kapabilitas/')) {
+        if (who !== 'owner') return json(403, { success: false, error: 'OWNER_REQUIRED' });
+        if (!kapabilitas) return json(503, { success: false, error: 'KAPABILITAS_BINDING_UNAVAILABLE' });
+        try {
+          if (p === '/api/r9/kapabilitas' && req.method === 'GET' && !url.search) return json(200, { success: true, data: kapabilitas.state() });
+          if (req.method !== 'POST' || url.search) return json(405, { success: false, error: 'METHOD_NOT_ALLOWED' });
+          const input = await body(req, 16384);
+          if (p === '/api/r9/kapabilitas/mcp/test') return json(200, { success: true, data: await kapabilitas.mcpTest(input.entry || {}) });
+          if (p === '/api/r9/kapabilitas/mcp/save') return json(200, { success: true, data: await kapabilitas.mcpSave(input.entry || {}) });
+          if (p === '/api/r9/kapabilitas/mcp/remove') return json(200, { success: true, data: await kapabilitas.mcpRemove(input.id) });
+          if (p === '/api/r9/kapabilitas/plugins/install') return json(200, { success: true, data: await kapabilitas.pluginInstall(input) });
+          if (p === '/api/r9/kapabilitas/plugins/enabled') return json(200, { success: true, data: await kapabilitas.pluginSetEnabled(input.id, input.enabled === true) });
+          if (p === '/api/r9/kapabilitas/plugins/remove') return json(200, { success: true, data: await kapabilitas.pluginRemove(input.id) });
+          if (p === '/api/r9/kapabilitas/skills/import') return json(200, { success: true, data: await kapabilitas.skillImport(input) });
+          if (p === '/api/r9/kapabilitas/skills/remove') return json(200, { success: true, data: await kapabilitas.skillRemove(input.name) });
+          return json(404, { success: false, error: 'ROUTE_NOT_FOUND' });
+        } catch (e) { if (e.status) return json(e.status, { success: false, error: e.message }); throw e; }
       }
       if (p === '/api/r9/lifecycle/restart') {
         if (req.method !== 'POST' || url.search) return json(405, { success: false, error: 'METHOD_NOT_ALLOWED' });
