@@ -265,7 +265,18 @@ const FEEDS = Object.freeze({
     attribution: 'NASA FIRMS (LANCE/EOSDIS)', license: 'NASA open data (no restriction; citation requested)', commercial: 'yes (citation)', limits: 'Free MAP_KEY: 5,000 transactions / 10 min.',
     async load(a, _cfg, ctx) {
       const b = bbox(a);
-      return parseFirmsCsv(await ctx.fetch(`https://firms.modaps.eosdis.nasa.gov/api/area/csv/${encodeURIComponent(ctx.key)}/VIIRS_SNPP_NRT/${[b.w, b.s, b.e, b.n].map(v => v.toFixed(3)).join(',')}/1`, { maxBytes: this.maxBytes }));
+      const box = [b.w, b.s, b.e, b.n].map(v => v.toFixed(3)).join(',');
+      // Both VIIRS near-real-time products are queried and merged: on
+      // 2026-11-28 VIIRS_SNPP_NRT answered a valid CSV header with zero
+      // rows worldwide while VIIRS_NOAA20_NRT carried the live detections,
+      // so a single-product feed would have shown a false empty map.
+      let netErr = null;
+      const one = async product => { try { return parseFirmsCsv(await ctx.fetch(`https://firms.modaps.eosdis.nasa.gov/api/area/csv/${encodeURIComponent(ctx.key)}/${product}/${box}/1`, { maxBytes: this.maxBytes })); } catch (e) { if (e && e.code !== 'UPSTREAM_KEY_REJECTED') netErr = netErr || e; return null; } };
+      const [noaa20, snpp] = await Promise.all([one('VIIRS_NOAA20_NRT'), one('VIIRS_SNPP_NRT')]);
+      if (noaa20 === null && snpp === null) { if (netErr) throw netErr; throw fail('UPSTREAM_KEY_REJECTED'); }
+      const seen = new Set(), out = [];
+      for (const row of [...(noaa20 || []), ...(snpp || [])]) { const k = row.lat + ',' + row.lon + ',' + row.acquired; if (seen.has(k)) continue; seen.add(k); out.push(row); }
+      return out;
     },
   },
   // Lightning (Owner order 2026-11-28): keyed-only by design. Blitzortung's
