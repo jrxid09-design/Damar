@@ -10,7 +10,7 @@ const { FEEDS, FEED_IDS, KEY_FEEDS, CCTV_SOURCES, SETTINGS_DEFAULTS } = require(
 const { createProactiveAlerts } = require('./proactive/proactive-alerts.cjs');
 const { createBmkgProviders } = require('./proactive/bmkg-providers.cjs');
 const { createExternalChannels } = require('./proactive/alert-channels.cjs');
-const { resolveMapsLink } = require('./proactive/maps-link.cjs');
+const { resolveMapsLink, resolvePasteInput } = require('./proactive/maps-link.cjs');
 const egress = require('./egress.cjs');
 const imagery = require('./imagery.cjs');
 const { createCameras, PUBLIC_SOURCES } = require('./cameras.cjs');
@@ -55,13 +55,47 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
   const config = () => settings?.mataDewa?.()?.mataDewa || SETTINGS_DEFAULTS();
   // ---- proactive alerts (Fase 6): autonomous Core engine over these feeds ----
   let gpsReport = null; // latest mobile-node GPS report (in-memory; the node re-reports on its cadence)
+  // Watch points (adm4) whose CURRENT forecast was already served from BMKG
+  // by the `forecast` provider in this freshness window; the `bmkgForecast`
+  // engine input then stays empty for that point, so one BMKG storm is
+  // never alerted twice (Indonesia-first dedupe, Owner rule 2026-11-28).
+  const bmkgServedAdm4 = new Map();
+  const bmkgProviders = createBmkgProviders({ fetchText: (url) => fetch(url, { timeoutMs, headers: { 'user-agent': egress.userAgent(config().contactUrl) }, maxBytes: 1024 * 1024 }) });
   const proactive = createProactiveAlerts({
     getSettings: () => { const c = config(); return { ...c, alerts: { ...(c.alerts || {}), enabled: !!(c.alerts?.enabled && c.consent) } }; },
     getProfile: () => { try { return settings?.presence?.()?.presence || {}; } catch { return {}; } },
     getGps: () => gpsReport,
     providers: {
-      quakes: async () => (await load('earthquakes', null, config())).items || [],
+      quakes: async () => {
+        // Indonesia first (Owner rule 2026-11-28): BMKG is the primary
+        // source; a USGS item duplicating a BMKG report (same event window,
+        // area and size) is dropped so BMKG's version, with BMKG's own
+        // wording, is the one alerted; the rest of USGS backfills. If BMKG
+        // is unreachable the full USGS list passes through unchanged.
+        const [usgs, bmkg] = await Promise.all([
+          load('earthquakes', null, config()).then(v => v.items || []).catch(() => []),
+          load('bmkgEarthquakes', null, config()).then(v => v.items || []).catch(() => []),
+        ]);
+        if (!bmkg.length) return usgs;
+        const dup = (u, b) => { const dt = Math.abs(Date.parse(u.time) - Date.parse(b.time)); if (!Number.isFinite(dt) || dt > 20 * 60e3) return false;
+          const dKm = Math.hypot((u.lat - b.lat) * 111, (u.lon - b.lon) * 111 * Math.cos(u.lat * Math.PI / 180));
+          return dKm <= 100 && Math.abs((u.magnitude ?? 0) - (b.magnitude ?? 0)) <= 1.2; };
+        return usgs.filter(u => !bmkg.some(b => dup(u, b)));
+      },
       forecast: async (loc) => {
+        // Indonesia first: a watch point carrying a BMKG village code
+        // (adm4) is served by BMKG's own forecast (its official wording is
+        // carried on the items); MET Norway backfills every other location
+        // and any BMKG failure.
+        if (loc.adm4) {
+          try {
+            const rows = await bmkgProviders.bmkgForecast(loc);
+            if (rows.length) {
+              bmkgServedAdm4.set(loc.adm4, Date.now());
+              return rows.map(r => ({ time: r.time, precipitationMm: r.precipitationMm ?? null, symbol: (r.weatherCode === 95 || r.weatherCode === 97) ? 'thunderstorm' : null, windKmh: r.windKmh ?? null, source: 'BMKG' }));
+            }
+          } catch { /* BMKG unreachable: global backfill below */ }
+        }
         const text = await fetch('https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=' + loc.lat.toFixed(4) + '&lon=' + loc.lon.toFixed(4), { timeoutMs, headers: { 'user-agent': egress.userAgent(config().contactUrl) }, maxBytes: 512 * 1024 });
         const ts = (JSON.parse(text).properties?.timeseries) || [];
         return ts.map(e => { const n1 = e.data?.next_1_hours || {}; const inst = e.data?.instant?.details || {}; return { time: e.time, precipitationMm: typeof n1.details?.precipitation_amount === 'number' ? n1.details.precipitation_amount : null, symbol: n1.summary?.symbol_code || null, windKmh: typeof inst.wind_speed === 'number' ? Math.round(inst.wind_speed * 36) / 10 : null }; });
@@ -74,7 +108,11 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
       scenes: async (loc) => { if (!config().alerts?.imageryAlerts) return []; return imagery.latestScenes(loc, { fetch: (url, o = {}) => fetch(url, { timeoutMs: 20000, ...o, headers: { 'user-agent': egress.userAgent(config().contactUrl), ...(o.headers || {}) } }) }); },
       // BMKG (official public data): quake list incl. BMKG's own tsunami
       // Potensi wording + village forecast for watch points carrying adm4.
-      ...createBmkgProviders({ fetchText: (url) => fetch(url, { timeoutMs, headers: { 'user-agent': egress.userAgent(config().contactUrl) }, maxBytes: 1024 * 1024 }) }),
+      ...bmkgProviders,
+      bmkgForecast: async (loc) => { const at = loc.adm4 ? bmkgServedAdm4.get(loc.adm4) : null; if (at && Date.now() - at < 30 * 60e3) return []; return bmkgProviders.bmkgForecast(loc); },
+      // Lightning strikes for the alert engine: the keyed Xweather layer
+      // only; without a stored key the layer honestly stays dark.
+      strikes: async (loc) => { if (!hasKey('lightning')) return []; const v = await load('lightning', { lat: loc.lat, lon: loc.lon, radiusKm: loc.radiusKm }, config()).catch(() => null); return ((v && v.items) || []).map(i => ({ lat: i.lat, lon: i.lon, time: i.time })); },
       // volcanoes: intentionally not wired live yet - no public machine-readable PVMBG feed could be
       // verified (MAGMA Indonesia publishes for humans; its API guesses return 403/404). The rule,
       // the coordinate catalog and the normalizer are implemented and fixture-tested; composing a
@@ -171,6 +209,50 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
     return { feed: id, hasKey: hasKey(id) };
   }
 
+  // "Uji" (Owner order 2026-11-28): validate the STORED key against the real
+  // provider with the smallest honest probe and report a stable result code
+  // the Control view words in Indonesian. The key value never leaves the
+  // vault; it is only placed in the outbound request, like a feed load.
+  async function testKey(id) {
+    const f = FEEDS[id]; if (!f?.credential) throw fail('FEED_NOT_FOUND', 404);
+    const key = keyFor(id); if (!key) throw fail('FEED_KEY_REQUIRED', 409);
+    const ua = { 'user-agent': egress.userAgent(config().contactUrl) };
+    const JKT = { lat: -6.2, lon: 106.8, radiusKm: 100 };
+    try {
+      if (id === 'fires') {
+        // FIRMS answers an invalid key with HTTP 200 and an error text, so
+        // the probe checks for the real CSV header of a tiny Jakarta box.
+        const text = await fetch('https://firms.modaps.eosdis.nasa.gov/api/area/csv/' + encodeURIComponent(key) + '/VIIRS_SNPP_NRT/106.3,-6.6,107.3,-5.8/1', { timeoutMs: 20000, headers: ua, maxBytes: 1024 * 1024 });
+        return /^latitude,longitude,/m.test(text) ? { feed: id, ok: true, code: 'OK' } : { feed: id, ok: false, code: 'UPSTREAM_KEY_REJECTED' };
+      }
+      if (id === 'traffic') {
+        JSON.parse(await fetch('https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?point=' + JKT.lat + ',' + JKT.lon + '&unit=KMPH&key=' + encodeURIComponent(key), { timeoutMs, headers: ua, maxBytes: 256 * 1024 }));
+        return { feed: id, ok: true, code: 'OK' };
+      }
+      if (id === 'openaq') {
+        JSON.parse(await fetch('https://api.openaq.org/v3/locations?coordinates=' + JKT.lat + ',' + JKT.lon + '&radius=25000&limit=1', { timeoutMs, headers: { ...ua, 'x-api-key': key }, maxBytes: 256 * 1024 }));
+        return { feed: id, ok: true, code: 'OK' };
+      }
+      if (id === 'opensky') {
+        const [cid, cs] = key.split('\n');
+        await fetch('https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token', { method: 'POST', timeoutMs, headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'grant_type=client_credentials&client_id=' + encodeURIComponent(cid) + '&client_secret=' + encodeURIComponent(cs || ''), maxBytes: 256 * 1024 });
+        return { feed: id, ok: true, code: 'OK' };
+      }
+      if (id === 'vessels') {
+        // AISStream: the subscription is accepted only with a valid key;
+        // the window helper resolves on open/message and rejects on an
+        // upstream auth error. A quiet ocean (no messages) still proves it.
+        await wsWindow('wss://stream.aisstream.io/v0/stream', { APIKey: key, BoundingBoxes: [[[JKT.lat - 1, JKT.lon - 1], [JKT.lat + 1, JKT.lon + 1]]] }, { windowMs: 8000, maxMessages: 1, maxBytes: 65536 });
+        return { feed: id, ok: true, code: 'OK' };
+      }
+      if (id === 'lightning') {
+        const items = await f.load(JKT, config(), { fetch: (url, o = {}) => fetch(url, { timeoutMs: 20000, ...o, headers: { ...ua, ...(o.headers || {}) } }), key, now });
+        return { feed: id, ok: true, code: 'OK', strikes: items.length };
+      }
+      return { feed: id, ok: false, code: 'TEST_UNSUPPORTED' };
+    } catch (e) { return { feed: id, ok: false, code: codeOf(e) }; }
+  }
+
   // JSON frame for Control (its CSP allows same-origin fetch only; the view draws it via createImageBitmap on a canvas).
   const frame = (json, buf) => json(200, { success: true, data: { jpeg: buf.toString('base64'), bytes: buf.length, at: new Date(now()).toISOString() } });
   const sendJpeg = (res, buf) => { res.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': buf.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'" }); res.end(buf); return true; };
@@ -179,7 +261,7 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
   async function handle(req, res, url, json, { who = 'requester', body = null } = {}) {
     const p = url.pathname, owner = who === 'owner', cfg = config();
     // keys/<feed>: POST only. cameras, alpr: GET (read) or POST (Owner change). Everything else: GET only.
-    const allowed = /^\/api\/r9\/mata-dewa\/keys\/[A-Za-z]{1,24}$/.test(p) ? ['POST'] : /^\/api\/r9\/mata-dewa\/(cameras|alpr|proactive|location\/gps|watchpoints\/import-link)$/.test(p) ? ['GET', 'POST'] : ['GET'];
+    const allowed = /^\/api\/r9\/mata-dewa\/keys\/[A-Za-z]{1,24}(\/test)?$/.test(p) ? ['POST'] : /^\/api\/r9\/mata-dewa\/(cameras|alpr|proactive|location\/gps|watchpoints\/import-link|watchpoints\/resolve)$/.test(p) ? ['GET', 'POST'] : ['GET'];
     const isPost = req.method === 'POST';
     // Only the public camera list takes a query (?q=<text>&page=<n>, server-side search + pagination).
     const listRoute = /^\/api\/r9\/mata-dewa\/cameras\/public\/[a-z-]{1,24}$/.test(p);
@@ -207,6 +289,7 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
           { fetch: (url, o = {}) => fetch(url, { timeoutMs: 30000, ...o, headers: { 'user-agent': egress.userAgent(cfg.contactUrl), ...(o.headers || {}) } }) });
         return p.endsWith('/frame') ? frame(json, buf) : sendJpeg(res, buf);
       }
+      if ((m = /^\/api\/r9\/mata-dewa\/keys\/([A-Za-z]{1,24})\/test$/.exec(p))) { ownerOnly(); return json(200, { success: true, data: await testKey(m[1]) }); }
       if ((m = /^\/api\/r9\/mata-dewa\/keys\/([A-Za-z]{1,24})$/.exec(p))) { ownerOnly(); if (!body) throw fail('BODY_UNAVAILABLE', 503); return json(200, { success: true, data: setKey(m[1], await body(req, 2048)) }); }
       if (p === '/api/r9/mata-dewa/cameras' && !isPost)
         return json(200, { success: true, data: { sources: cfg.cctvSources, own: owner ? cameras.own() : [], ffmpeg: cameras.ffmpeg() } });
@@ -223,7 +306,7 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
         const needle = q.toLowerCase(), all = (await cameras.publicList(m[1])).filter(c => !needle || c.name.toLowerCase().includes(needle) || c.id.toLowerCase().includes(needle));
         const PAGE = 24, pages = Math.max(1, Math.ceil(all.length / PAGE));
         return json(200, { success: true, data: { source: m[1], label: s.label, attribution: s.attribution, license: s.license, q, page, pages, total: all.length,
-          cameras: all.slice((page - 1) * PAGE, page * PAGE).map(({ imageUrl, ...c }) => c) } });
+          cameras: all.slice((page - 1) * PAGE, page * PAGE).map(({ imageUrl, streamUrl, ref, ...c }) => c) } });
       }
       if ((m = /^\/api\/r9\/mata-dewa\/cameras\/own\/(cam-[a-f0-9]{12})\/(snapshot|frame)$/.exec(p))) {
         ownerOnly(); if (!cfg.cctvNoticeAt) throw fail('CCTV_NOTICE_REQUIRED', 409);
@@ -240,6 +323,15 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
     if (!Number.isFinite(b.lat) || Math.abs(b.lat) > 90 || !Number.isFinite(b.lon) || Math.abs(b.lon) > 180) return json(400, { success: false, error: 'GPS_INVALID' });
     gpsReport = { lat: b.lat, lon: b.lon, at: Number.isFinite(b.at) ? b.at : Date.now(), ...(Number.isFinite(b.radiusKm) ? { radiusKm: Math.min(1000, Math.max(10, b.radiusKm)) } : {}) };
     return json(200, { success: true, data: { recorded: true } });
+  }
+  if (p === '/api/r9/mata-dewa/watchpoints/resolve' && isPost) {
+    if (!owner) return json(403, { success: false, error: 'OWNER_REQUIRED' });
+    const b = body || {};
+    const httpGet = async (u) => { const r = await globalThis.fetch(u, { redirect: 'manual', signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined }); let text = ''; if (r.status === 200) text = (await r.text()).slice(0, 1024 * 1024); return { status: r.status, location: r.headers.get('location') || undefined, body: text }; };
+    const refArea = (config().areas || [])[0];
+    const resolved = await resolvePasteInput(typeof b.input === 'string' ? b.input : '', { httpGet, reference: refArea ? { lat: refArea.lat, lon: refArea.lon } : null });
+    if (!resolved.ok) return json(400, { success: false, error: resolved.error });
+    return json(200, { success: true, data: { kind: resolved.kind, sourceUrl: resolved.sourceUrl || null, points: resolved.points.map(pt => ({ name: pt.name, lat: pt.lat, lon: pt.lon, kind: pt.kind })) } });
   }
   if (p === '/api/r9/mata-dewa/watchpoints/import-link' && isPost) {
     if (!owner) return json(403, { success: false, error: 'OWNER_REQUIRED' });
@@ -283,7 +375,7 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
     }
   }
 
-  return { handle, status, feed, setKey, cameras, alpr, wsWindow, proactive };
+  return { handle, status, feed, setKey, testKey, cameras, alpr, wsWindow, proactive };
 }
 
 module.exports = { createMataDewa, NOTICE, wsWindow };

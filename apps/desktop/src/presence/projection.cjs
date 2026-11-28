@@ -87,11 +87,18 @@ function projectMataDewa(m) {
   const chipChanged = !!chip && (chip.sceneKey !== lastChipKey || Date.now() - lastChipShipAt > 60000);
   if (chipChanged) { lastChipKey = chip.sceneKey; lastChipShipAt = Date.now(); }
   if (!chip && !m.feeds?.imagery) lastChipKey = null;
+  // Indonesia first (Owner rule 2026-11-28): the Presence quake list is led
+  // by BMKG; USGS items duplicating a BMKG report are dropped, the rest
+  // backfill behind it. Every row carries its source attribution.
+  const rawQuakes = (feed, src) => { const items = feed?.results?.[0]?.items; return Array.isArray(items) ? items.slice(0, 8).map(q => ({ mag: typeof q.magnitude === 'number' ? q.magnitude : null, place: text(q.place, 90), depthKm: typeof q.depthKm === 'number' ? q.depthKm : null, source: src, lat: q.lat, lon: q.lon, time: q.time })) : []; };
+  const bq = rawQuakes(m.feeds?.bmkgEarthquakes, 'BMKG'), uq = rawQuakes(m.feeds?.earthquakes, 'USGS');
+  const dupQ = (u, b) => { const dt = Math.abs(Date.parse(u.time) - Date.parse(b.time)); if (!Number.isFinite(dt) || dt > 20 * 60e3 || typeof u.lat !== 'number' || typeof b.lat !== 'number') return false; return Math.hypot((u.lat - b.lat) * 111, (u.lon - b.lon) * 111) <= 100 && Math.abs((u.mag ?? 0) - (b.mag ?? 0)) <= 1.2; };
+  const quakesMerged = [...bq, ...uq.filter(u => !bq.some(b => dupQ(u, b)))].slice(0, 4).map(({ lat, lon, time, ...q }) => q);
   return {
     consent: m.status?.consent === true,
     areas: (Array.isArray(m.status?.areas) ? m.status.areas : []).map(a => ({ name: text(a.name, 60), seeded: a.id === 'jakarta' })).filter(a => a.name),
     watchPoints: (Array.isArray(m.status?.watchPoints) ? m.status.watchPoints : []).map(w => ({ name: text(w.name, 60), profile: text(w.profile, 12), lat: typeof w.lat === 'number' ? w.lat : null, lon: typeof w.lon === 'number' ? w.lon : null })).filter(w => w.name),
-    earthquakes: m.feeds?.earthquakes ? { attribution: text(m.feeds.earthquakes.attribution, 90), items: feedItems(m.feeds.earthquakes, q => ({ mag: typeof q.magnitude === 'number' ? q.magnitude : null, place: text(q.place, 90), depthKm: typeof q.depthKm === 'number' ? q.depthKm : null })) } : null,
+    earthquakes: (m.feeds?.earthquakes || m.feeds?.bmkgEarthquakes) ? { attribution: text(m.feeds?.bmkgEarthquakes?.attribution || m.feeds?.earthquakes?.attribution, 90), items: quakesMerged } : null,
     disasters: m.feeds?.disasters ? { attribution: text(m.feeds.disasters.attribution, 90), items: feedItems(m.feeds.disasters, d => ({ event: text(d.name || d.type, 90), country: text(d.country, 60), severity: text(d.severity, 30) })) } : null,
     weather: m.feeds?.weather ? { attribution: text(m.feeds.weather.attribution, 90), items: feedItems(m.feeds.weather, w => ({ temperatureC: typeof w.temperatureC === 'number' ? w.temperatureC : null, sky: text(w.sky || w.symbol, 40) })) } : null,
     cyclones: m.feeds?.cyclones ? { attribution: text(m.feeds.cyclones.attribution, 90), items: feedItems(m.feeds.cyclones, c => ({ name: text(c.name, 60), classification: text(c.classification, 20), intensityKt: typeof c.intensityKt === 'number' ? c.intensityKt : null })) } : null,

@@ -44,7 +44,7 @@ const weatherStorm = {
     const e = heavy[0];
     const leadMinutes = Math.max(0, Math.round((Date.parse(e.time) - nowMs) / 60000));
     return [{ ruleId: 'weather-storm', kind: 'alert', eventId: 'storm:' + location.id + ':' + e.time.slice(0, 13), severity: e._thunder ? 'warning' : 'watch',
-      data: { at: e.time, leadMinutes, precipitationMm: e.precipitationMm ?? null, symbol: e.symbol || null, thunder: !!e._thunder, windKmh: e.windKmh ?? null, source: 'MET Norway' } }];
+      data: { at: e.time, leadMinutes, precipitationMm: e.precipitationMm ?? null, symbol: e.symbol || null, thunder: !!e._thunder, windKmh: e.windKmh ?? null, source: e.source || 'MET Norway' } }];
   },
 };
 
@@ -152,5 +152,28 @@ const volcanoStatus = {
   },
 };
 
-const RULES = [quakeNear, weatherStorm, fireNear, imageryObservation, bmkgQuakeNear, tsunamiRelay, bmkgExtremeWeather, volcanoStatus];
+// Live lightning (Vaisala Xweather, keyed): a strike inside the point's
+// radius within the last 15 minutes warns once per storm cell window; the
+// nearest strike and the strike count are the facts carried. Source
+// attribution rides on every signal.
+const lightningNear = {
+  id: 'lightning-near', profiles: ['personal', 'asset'], input: 'strikes',
+  evaluate({ items = [], location, cfg, nowMs }) {
+    const fresh = [];
+    for (const s of items) {
+      if (!Number.isFinite(s.lat) || !Number.isFinite(s.lon)) continue;
+      const at = Date.parse(s.time); if (!Number.isFinite(at) || nowMs - at > 15 * 60e3 || at > nowMs + 2 * 60e3) continue;
+      const distanceKm = Math.round(haversineKm(location, s) * 10) / 10;
+      if (distanceKm > location.radiusKm) continue;
+      fresh.push({ ...s, distanceKm });
+    }
+    if (!fresh.length) return [];
+    fresh.sort((a, b) => a.distanceKm - b.distanceKm);
+    const n = fresh[0];
+    return [{ ruleId: 'lightning-near', kind: 'alert', eventId: 'lightning:' + location.id + ':' + String(n.time).slice(0, 13), severity: n.distanceKm <= 10 ? 'critical' : 'warning',
+      data: { distanceKm: n.distanceKm, count: fresh.length, time: n.time, source: 'Vaisala Xweather' } }];
+  },
+};
+
+const RULES = [quakeNear, weatherStorm, fireNear, imageryObservation, bmkgQuakeNear, tsunamiRelay, bmkgExtremeWeather, volcanoStatus, lightningNear];
 module.exports = { RULES, SEVERITY_RANK };

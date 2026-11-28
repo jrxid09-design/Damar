@@ -51,6 +51,10 @@ function composeMessage(signal, location, { salutation = '' } = {}) {
       ', ' + d.distanceKm + ' km dari ' + phrase + '. Sumber: ' + d.source + '. ' +
       'Saran: ikuti rekomendasi PVMBG dan hindari zona bahaya di sekitar gunung tersebut.';
   }
+  if (signal.ruleId === 'lightning-near') {
+    return greet + 'sambaran petir terdeteksi ' + d.distanceKm + ' km dari ' + phrase + ' (' + d.count + ' sambaran dalam 15 menit terakhir, terdekat pukul ' + hhmm(d.time) + '). Sumber: ' + d.source + '. ' +
+      (location.profile === 'asset' ? 'Saran: hentikan sementara pekerjaan di ketinggian dan di sekitar aset sampai badai menjauh.' : 'Saran: tetap di dalam ruangan sampai badai menjauh.');
+  }
   if (signal.ruleId === 'fire-near') {
     return greet + 'hotspot kebakaran terdeteksi ' + d.distanceKm + ' km dari ' + phrase + (Number.isFinite(d.frp) ? ' (FRP ' + d.frp + ')' : '') +
       '. Sumber: ' + d.source + '. Saran: verifikasi kondisi lapangan di sekitar titik tersebut.';

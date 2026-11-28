@@ -30,7 +30,7 @@ const rank = s => SEVERITY_RANK[s] || 0;
 // a family switched off for a point silences only that family for that point.
 // Imagery observations additionally honour the global imageryAlerts switch.
 const RULE_FAMILY = Object.freeze({ 'quake-near': 'quake', 'bmkg-quake-near': 'quake', 'tsunami-relay': 'quake',
-  'weather-storm': 'storm', 'bmkg-extreme-weather': 'storm', 'volcano-status': 'storm', 'fire-near': 'fire', 'imagery-observation': 'imagery' });
+  'weather-storm': 'storm', 'bmkg-extreme-weather': 'storm', 'volcano-status': 'storm', 'lightning-near': 'storm', 'fire-near': 'fire', 'imagery-observation': 'imagery' });
 function inQuietHours(nowMs, qh) {
   if (!qh || !/^\d{2}:\d{2}$/.test(qh.start || '') || !/^\d{2}:\d{2}$/.test(qh.end || '')) return false;
   const d = new Date(nowMs), mins = d.getHours() * 60 + d.getMinutes();

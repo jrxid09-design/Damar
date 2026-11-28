@@ -102,4 +102,89 @@ async function resolveMapsLink(rawUrl, { httpGet } = {}) {
   return { ok: false, error: 'TOO_MANY_REDIRECTS' };
 }
 
-module.exports = { resolveMapsLink, parseKml, coordsFromUrl, ALLOWED_HOSTS };
+// --- Plus Codes (Open Location Code) + raw coordinates -------------------------------------------
+// The add-point form also accepts a pasted Plus Code or a plain "lat, lon"
+// pair (Owner order 2026-11-28: paste-only watch-point creation). Decoding
+// follows the public Open Location Code specification; a short (compound)
+// code is recovered against a reference location (the first configured
+// area, else the product's neutral Jakarta default) - the same recovery
+// Google Maps itself performs with the locality named after the code.
+const OLC_ALPHABET = '23456789CFGHJMPQRVWX';
+const OLC_PAIR_RES = [20, 1, 0.05, 0.0025, 0.000125];
+const olcIdx = ch => OLC_ALPHABET.indexOf(ch);
+function olcDecodeDigits(digits) {
+  // digits: the full significant digit string (no '+', no padding).
+  let lat = -90, lon = -180, latRes = 0, lonRes = 0;
+  const pairCount = Math.min(5, Math.floor(digits.length / 2));
+  for (let i = 0; i < pairCount; i++) {
+    latRes = OLC_PAIR_RES[i]; lonRes = OLC_PAIR_RES[i];
+    lat += olcIdx(digits[2 * i]) * latRes;
+    lon += olcIdx(digits[2 * i + 1]) * lonRes;
+  }
+  if (digits.length > 10) {
+    for (let i = 10; i < digits.length; i++) {
+      latRes /= 5; lonRes /= 4;
+      const v = olcIdx(digits[i]);
+      lat += Math.floor(v / 4) * latRes;
+      lon += (v % 4) * lonRes;
+    }
+  }
+  return { lat: lat + latRes / 2, lon: lon + lonRes / 2 };
+}
+function decodePlusCode(raw, reference = null) {
+  const m = /^([23456789CFGHJMPQRVWX]{2,8})\+([23456789CFGHJMPQRVWX]{2,})$/.exec(String(raw || '').trim().toUpperCase());
+  if (!m) return null;
+  const head = m[1].replace(/0+$/, ''), tail = m[2];
+  if (head.length % 2 || tail.length < 2) return null;
+  const digits = head + tail;
+  if (digits.length < 4 || [...digits].some(ch => olcIdx(ch) < 0)) return null;
+  if (head.length >= 8) {
+    const c = olcDecodeDigits(digits);
+    return Math.abs(c.lat) <= 90 && Math.abs(c.lon) <= 180 ? c : null;
+  }
+  // Compound (short) code: its digits are the tail of a full code; recover
+  // the prefix cell nearest to the reference location.
+  if (!reference || !Number.isFinite(reference.lat) || !Number.isFinite(reference.lon)) return null;
+  const p0 = (8 - head.length) / 2; // first pair index the head digits occupy
+  if (!Number.isSafeInteger(p0) || p0 < 1) return null;
+  let lat = -90, lon = -180;
+  const pairCount = Math.min(5, Math.floor(digits.length / 2));
+  for (let i = 0; i < pairCount; i++) {
+    lat += olcIdx(digits[2 * i]) * OLC_PAIR_RES[p0 + i];
+    lon += olcIdx(digits[2 * i + 1]) * OLC_PAIR_RES[p0 + i];
+  }
+  let latRes = OLC_PAIR_RES[p0 + pairCount - 1], lonRes = latRes;
+  if (digits.length > 10) {
+    for (let i = 10; i < digits.length; i++) { latRes /= 5; lonRes /= 4; const v = olcIdx(digits[i]); lat += Math.floor(v / 4) * latRes; lon += (v % 4) * lonRes; }
+  }
+  const cell = 20 * OLC_PAIR_RES[p0];
+  lat += Math.round((reference.lat - (lat + latRes / 2)) / cell) * cell;
+  lon += Math.round((reference.lon - (lon + lonRes / 2)) / cell) * cell;
+  const c = { lat: lat + latRes / 2, lon: lon + lonRes / 2 };
+  return Math.abs(c.lat) <= 90 && Math.abs(c.lon) <= 180 ? c : null;
+}
+function parseCoordsText(raw) {
+  const m = /^(-?\d{1,2}(?:\.\d+)?)°?\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)°?$/.exec(String(raw || '').trim());
+  if (!m) return null;
+  const lat = Number(m[1]), lon = Number(m[2]);
+  return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon } : null;
+}
+// One paste box, three input families: a Maps link (delegates to
+// resolveMapsLink), a Plus Code, or raw coordinates.
+async function resolvePasteInput(raw, { httpGet, reference = null } = {}) {
+  const input = String(raw || '').trim();
+  if (!input) return { ok: false, error: 'INPUT_EMPTY' };
+  if (/^https?:\/\//i.test(input)) return resolveMapsLink(input, { httpGet });
+  const codeToken = input.split(/\s+/)[0];
+  if (codeToken.includes('+')) {
+    const c = decodePlusCode(codeToken, reference);
+    if (!c) return { ok: false, error: 'PLUS_CODE_INVALID' };
+    const locality = input.slice(codeToken.length).trim().replace(/[^\p{L}\p{N} .,'()_-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+    return { ok: true, kind: 'pluscode', points: [{ name: locality || 'Titik pantau', lat: Math.round(c.lat * 1e6) / 1e6, lon: Math.round(c.lon * 1e6) / 1e6, kind: 'point' }], sourceUrl: null };
+  }
+  const coords = parseCoordsText(input);
+  if (coords) return { ok: true, kind: 'coords', points: [{ name: 'Titik pantau', lat: coords.lat, lon: coords.lon, kind: 'point' }], sourceUrl: null };
+  return { ok: false, error: 'INPUT_NOT_RECOGNIZED' };
+}
+
+module.exports = { resolveMapsLink, parseKml, coordsFromUrl, ALLOWED_HOSTS, decodePlusCode, parseCoordsText, resolvePasteInput };

@@ -8,6 +8,7 @@
 // (OAuth token, WebSocket window). ctx = { fetch, key, ws, now }.
 
 const imagery = require('./imagery.cjs');
+const { normalizeBmkgQuakes } = require('./proactive/bmkg-providers.cjs');
 const num = v => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 const str = (v, n = 120) => (typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, n) || null : null);
 const round = (v, d) => (v === null ? null : Number(v.toFixed(d)));
@@ -101,6 +102,17 @@ function parseFirmsCsv(text) {
 const SAT_GROUPS = ['stations', 'visual', 'weather', 'gps-ops', 'science', 'geo'];
 
 const FEEDS = Object.freeze({
+  // Indonesia first (Owner rule 2026-11-28): BMKG is the primary earthquake
+  // source for Indonesia; the USGS feed below is the global backfill. BMKG's
+  // own tsunami-potential wording (`potensi`) is carried verbatim on every
+  // item and relayed, never rewritten (see the tsunami-relay rule).
+  bmkgEarthquakes: {
+    label: 'Gempa bumi (BMKG)', host: 'data.bmkg.go.id', perArea: false, minRefreshSec: 60, defaultRefreshSec: 300, maxBytes: 1024 * 1024,
+    attribution: 'BMKG (Badan Meteorologi, Klimatologi, dan Geofisika)', license: 'Data terbuka BMKG', commercial: 'yes', limits: 'No key. Recent M5+ list plus the latest quake, republished by BMKG from its TEWS network.',
+    url: () => 'https://data.bmkg.go.id/DataMKG/TEWS/gempaterkini.json',
+    parse: text => normalizeBmkgQuakes(JSON.parse(text)).map(g => ({ id: g.id, lat: round(g.lat, 3), lon: round(g.lon, 3), depthKm: g.depthKm, magnitude: g.magnitude,
+      place: str(g.place, 160), time: g.time, potensi: str(g.potensi, 200), source: 'BMKG' })).filter(g => g.lat !== null && g.lon !== null).slice(0, 100),
+  },
   earthquakes: {
     label: 'Earthquakes (24 h)', host: 'earthquake.usgs.gov', perArea: false, minRefreshSec: 60, defaultRefreshSec: 300, maxBytes: 4 * 1024 * 1024,
     attribution: 'USGS Earthquake Hazards Program', license: 'U.S. public domain', commercial: 'yes', limits: 'No key. Feed regenerated every minute.',
@@ -256,6 +268,26 @@ const FEEDS = Object.freeze({
       return parseFirmsCsv(await ctx.fetch(`https://firms.modaps.eosdis.nasa.gov/api/area/csv/${encodeURIComponent(ctx.key)}/VIIRS_SNPP_NRT/${[b.w, b.s, b.e, b.n].map(v => v.toFixed(3)).join(',')}/1`, { maxBytes: this.maxBytes }));
     },
   },
+  // Lightning (Owner order 2026-11-28): keyed-only by design. Blitzortung's
+  // published terms refuse third-party use of its live data stream (the raw
+  // data is reserved to contributing station operators; commercial use is
+  // prohibited), so no free live source is wired. A Vaisala Xweather app key
+  // (client id + secret) lights this layer up: the standard lightning access
+  // serves the past 5 minutes via `closest`, radius capped at 100 km.
+  lightning: {
+    label: 'Sambaran petir (Vaisala Xweather)', host: 'data.api.xweather.com', perArea: true, minRefreshSec: 60, defaultRefreshSec: 300, maxBytes: 1024 * 1024,
+    credential: { fields: ['clientId', 'clientSecret'], signupUrl: 'https://www.xweather.com/' },
+    attribution: 'Vaisala Xweather (lightning data: Vaisala GLD360 / NLDN)', license: 'Xweather terms of service (subscription)', commercial: 'per Xweather plan', limits: 'App key (client id + secret). Standard access: strikes of the past 5 minutes, radius up to 100 km, up to 1,000 strikes per query.',
+    async load(a, _cfg, ctx) {
+      const [clientId, clientSecret] = String(ctx.key).split('\n');
+      const radiusMiles = Math.max(1, Math.min(62, Math.round(a.radiusKm * 0.621371)));
+      const data = JSON.parse(await ctx.fetch('https://data.api.xweather.com/lightning/closest?' + q({ p: a.lat.toFixed(4) + ',' + a.lon.toFixed(4), radius: radiusMiles + 'miles', limit: '1000', format: 'json', client_id: clientId, client_secret: clientSecret || '' }), { maxBytes: this.maxBytes }));
+      if (!data || data.success !== true) throw fail('UPSTREAM_KEY_REJECTED');
+      return (data.response || []).map(s => { const loc = s?.loc || {}, ob = s?.ob || {};
+        const lat = num(loc.lat), lon = num(loc.long); if (lat === null || lon === null) return null;
+        return { id: str(s.id, 40), lat: round(lat, 4), lon: round(lon, 4), time: str(ob.dateTimeISO, 32), type: str(ob.type || ob.pulseType, 8), peakAmp: num(ob.peakAmps ?? ob.amperage ?? ob.peakCurrent) }; }).filter(Boolean);
+    },
+  },
   traffic: {
     label: 'Traffic flow at area centre (TomTom)', host: 'api.tomtom.com', perArea: true, minRefreshSec: 120, defaultRefreshSec: 600, maxBytes: 256 * 1024,
     credential: { fields: ['apiKey'], signupUrl: 'https://developer.tomtom.com/user/register' },
@@ -275,10 +307,10 @@ const KEY_FEEDS = Object.freeze(FEED_IDS.filter(id => FEEDS[id].credential));
 // consent: Owner's acknowledgement (Control) that Core may contact the disclosed public hosts; nothing is fetched before.
 // cctvNoticeAt / alprNoticeAt: when the Owner accepted the CCTV / ALPR legal notice in Control (null = not accepted).
 const AREA_ID = /^[a-z0-9-]{1,24}$/, AREA_NAME = /^[\p{L}\p{N} .,'()_-]{1,40}$/u;
-const CCTV_SOURCES = ['tfl-london', 'fintraffic'];
+const CCTV_SOURCES = ['tfl-london', 'fintraffic', 'bpjt-tol', 'atcs-bandung', 'cctv-jogja'];
 // Default feeds are the commercially usable keyless ones; Open-Meteo/OpenSky stay optional and labelled non-commercial.
 // contactUrl: optional https:// or mailto: contact appended to the User-Agent (MET Norway asks for one); empty by default.
-const SETTINGS_DEFAULTS = () => ({ consent: false, contactUrl: '', feeds: ['earthquakes', 'weather', 'disasters', 'satellites', 'launches', 'imagery'],
+const SETTINGS_DEFAULTS = () => ({ consent: false, contactUrl: '', feeds: ['bmkgEarthquakes', 'earthquakes', 'weather', 'disasters', 'satellites', 'launches', 'imagery'],
   areas: [{ id: 'jakarta', name: 'Jakarta', lat: -6.2, lon: 106.8, radiusKm: 150 }],
   refreshSec: Object.fromEntries(FEED_IDS.map(id => [id, FEEDS[id].defaultRefreshSec])), satelliteGroup: 'stations',
   cctvSources: [], cctvNoticeAt: null, alprNoticeAt: null, alprRetentionDays: 30, alprIntervalSec: 15, watchPoints: [], alerts: ALERTS_DEFAULTS() });

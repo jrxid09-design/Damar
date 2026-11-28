@@ -59,6 +59,14 @@ These sources are fetched at runtime and never bundled. Each keeps its own terms
 | traffic (Owner key) | TomTom Traffic API | TomTom terms | © TomTom | per plan |
 | public cameras | TfL JamCams | TfL Open Data terms (OGL v2 based) | Powered by TfL Open Data | per TfL terms |
 | public cameras | Fintraffic weather cameras (digitraffic.fi) | CC BY 4.0 | Fintraffic / digitraffic.fi | yes |
+| earthquakes (Indonesia, primary) | BMKG gempaterkini (data.bmkg.go.id) | BMKG open data | BMKG (Badan Meteorologi, Klimatologi, dan Geofisika) | yes |
+| weather (Indonesia watch points) | BMKG village forecast (api.bmkg.go.id) | BMKG open data; official warning wording relayed verbatim | BMKG | yes |
+| lightning (Owner key) | Vaisala Xweather lightning API | Xweather terms of service (subscription) | Vaisala Xweather (lightning data: Vaisala GLD360 / NLDN) | per Xweather plan |
+| public cameras (Indonesia) | BPJT toll cameras (bpjt.pu.go.id) | Official public portal of BPJT, Kementerian Pekerjaan Umum; streams served by the toll operators' public host | BPJT, Kementerian Pekerjaan Umum, kamera operator jalan tol | public viewing portal |
+| public cameras (Indonesia) | ATCS Dishub Kota Bandung (atcs-dishub.bandung.go.id) | Official public portal of Dinas Perhubungan Kota Bandung | ATCS Dinas Perhubungan Kota Bandung | public viewing portal |
+| public cameras (Indonesia) | CCTV Pemerintah Kota Yogyakarta (cctv.jogjakota.go.id) | Official public portal of Pemerintah Kota Yogyakarta | Pemerintah Kota Yogyakarta | public viewing portal |
+
+**Lightning, why keyed-only.** Blitzortung.org was evaluated as the free live lightning source (2026-11-28). Its published position, repeated by its team in its public forums, is that the network's raw real-time data is reserved to contributing station operators, that third-party apps and websites may not redistribute it, and that commercial use is prohibited. DAMAR therefore does not integrate Blitzortung; the lightning layer works only with the Owner's own Vaisala Xweather key.
 
 ## Optional local components (installed on demand, never bundled)
 

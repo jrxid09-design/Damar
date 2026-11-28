@@ -12,6 +12,12 @@ const HOSTS = Object.freeze([
   'api.tfl.gov.uk', 's3-eu-west-1.amazonaws.com', 'tie.digitraffic.fi', 'weathercam.digitraffic.fi',
   'api.met.no', 'www.gdacs.org', 'api.openaq.org',
   'cmr.earthdata.nasa.gov', 'wvs.earthdata.nasa.gov',
+  // Indonesia-first expansion (2026-11-28): BMKG official public data, the
+  // Xweather (Vaisala) API for the keyed lightning layer, and the verified
+  // official Indonesian public-camera publishers (BPJT portal + Jasa Marga
+  // stream host, Dishub Kota Bandung ATCS, Pemerintah Kota Yogyakarta).
+  'data.bmkg.go.id', 'api.bmkg.go.id', 'data.api.xweather.com',
+  'bpjt.pu.go.id', 'jmlive.jasamarga.com', 'atcs-dishub.bandung.go.id', 'cctv.jogjakota.go.id', 'cctvjss.jogjakota.go.id',
 ]);
 // Shared hosts are narrowed to the publisher's own path.
 const PATH_PREFIX = Object.freeze({ 's3-eu-west-1.amazonaws.com': '/jamcams.tfl.gov.uk/' });

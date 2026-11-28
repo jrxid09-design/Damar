@@ -6,9 +6,10 @@
 // UI language follows the shared CLI language setting (GET /api/r9/cli/settings, cli.language; null -> English).
 (function (root) {
   'use strict';
-  var FEED_ORDER = ['earthquakes', 'disasters', 'cyclones', 'weather', 'openMeteo', 'openaq', 'airQuality', 'flights', 'opensky', 'military', 'vessels', 'fires', 'traffic', 'satellites', 'launches', 'imagery'];
+  var FEED_ORDER = ['bmkgEarthquakes', 'earthquakes', 'disasters', 'cyclones', 'weather', 'openMeteo', 'openaq', 'airQuality', 'flights', 'opensky', 'military', 'vessels', 'fires', 'lightning', 'traffic', 'satellites', 'launches', 'imagery'];
   var md = { status: null, statusError: null, feeds: {}, loading: false, lastLoad: 0, draft: null, awaitingStatus: false, saving: false, message: '', lang: 'en',
-    cams: {}, camPage: {}, own: [], alpr: null, filter: '', frames: {}, frameLoading: {}, camForm: { kind: 'snapshot' }, proactive: null, importUrl: '', importProfile: 'asset' };
+    cams: {}, camPage: {}, own: [], alpr: null, filter: '', frames: {}, frameLoading: {}, camForm: { kind: 'snapshot' }, proactive: null, importUrl: '', importProfile: 'asset',
+    keyTest: {}, keyTesting: {}, pasteInput: '', pastePreview: null, pasteError: '' };
   var H = null;
 
   // ---- i18n (English first; Indonesian when cli.language === 'id') ---------------------------------------------------
@@ -28,7 +29,10 @@
       alertsTitle: 'Proactive alerts', alertEnabled: 'Alerts on', tickMinutes: 'Check every (min)', quietHours: 'Quiet hours', gpsEnabled: 'Use mobile GPS', imageryAlertsOpt: 'Satellite imagery observations',
       channels: 'Channels', chNotch: 'Notch', deliveries: 'Recent deliveries', checkNow: 'Check now', lastTick: 'Last check', noDeliveries: 'No alerts delivered yet.',
       quakeMin: 'Quake min. magnitude', quakeRadius: 'Quake radius (km)', quakeAge: 'Quake max age (h)', stormRain: 'Storm rain (mm/h)', stormWind: 'Storm wind (km/h)', chatId: 'Telegram chat ID', waPhone: 'WhatsApp phone number ID', waTo: 'WhatsApp destination',
-      cloud: 'cloud', passDate: 'Pass', notLive: 'Dated satellite pass, not a live view.', noScenes: 'No dated pass found for the configured locations yet.' },
+      cloud: 'cloud', passDate: 'Pass', notLive: 'Dated satellite pass, not a live view.', noScenes: 'No dated pass found for the configured locations yet.',
+      testKey: 'Test key', testing: 'Testing…', testOk: 'Key works: the provider accepted it.', testFail: 'Test failed', strikesNow: 'strikes in the last 5 minutes',
+      pasteLabel: 'Paste a Maps link, Plus Code, or coordinates', pasteBtn: 'Check', pasteAdd: 'Add this point', pasteErr: 'Could not resolve that input',
+      pasteHint: 'A Google Maps pin link, a Plus Code, or plain coordinates (lat, lon). Core resolves it and shows a preview; nothing is saved until you add the point and press Save to Core.' },
     id: { subtitle: 'Umpan dunia publik, gempa, siklon, cuaca, kualitas udara, pesawat, kapal, kebakaran, satelit dan peluncuran, serta kamera Anda sendiri.',
       consentTitle: 'Persetujuan & pengungkapan koneksi keluar', consentOn: 'Saya setuju, aktifkan umpan publik', consentOff: 'Cabut persetujuan (hentikan semua umpan)', hosts: 'Host',
       given: 'persetujuan diberikan', none: 'belum ada persetujuan · tidak ada yang diambil', loading: 'Memuat dari Core…', plot: 'Peta dunia', noBasemap: 'Tanpa peta dasar: koordinat pada grid polos.',
@@ -44,7 +48,10 @@
       alertsTitle: 'Peringatan proaktif', alertEnabled: 'Peringatan aktif', tickMinutes: 'Periksa tiap (menit)', quietHours: 'Jam tenang', gpsEnabled: 'Pakai GPS ponsel', imageryAlertsOpt: 'Observasi citra satelit',
       channels: 'Saluran', chNotch: 'Notch', deliveries: 'Pengiriman terakhir', checkNow: 'Periksa sekarang', lastTick: 'Pemeriksaan terakhir', noDeliveries: 'Belum ada peringatan terkirim.',
       quakeMin: 'Magnitudo gempa min.', quakeRadius: 'Radius gempa (km)', quakeAge: 'Usia gempa maks. (jam)', stormRain: 'Hujan badai (mm/jam)', stormWind: 'Angin badai (km/jam)', chatId: 'ID chat Telegram', waPhone: 'ID nomor WhatsApp', waTo: 'Tujuan WhatsApp',
-      cloud: 'awan', passDate: 'Lintasan', notLive: 'Citra satelit bertanggal, bukan pantauan langsung.', noScenes: 'Belum ada lintasan bertanggal untuk lokasi yang diatur.' }
+      cloud: 'awan', passDate: 'Lintasan', notLive: 'Citra satelit bertanggal, bukan pantauan langsung.', noScenes: 'Belum ada lintasan bertanggal untuk lokasi yang diatur.',
+      testKey: 'Uji kunci', testing: 'Menguji…', testOk: 'Kunci berfungsi: penyedia menerimanya.', testFail: 'Uji gagal', strikesNow: 'sambaran dalam 5 menit terakhir',
+      pasteLabel: 'Tempel tautan Maps, Plus Code, atau koordinat', pasteBtn: 'Periksa', pasteAdd: 'Tambahkan titik ini', pasteErr: 'Masukan itu tidak dapat dikenali',
+      pasteHint: 'Tautan pin Google Maps, Plus Code, atau koordinat biasa (lat, lon). Core menguraikannya dan menampilkan pratinjau; belum ada yang tersimpan sampai titik ditambahkan lalu Anda menekan Simpan ke Core.' }
   };
   function T(k) { return (STR[md.lang] && STR[md.lang][k]) || STR.en[k] || k; }
   function esc(v) { return H.escapeHtml(v == null ? '-' : v); }
@@ -109,7 +116,9 @@
     var pts = '';
     st.areas.forEach(function (a) { var p = xy(a.lat, a.lon), r = Math.max(2, a.radiusKm / 111 * 2); pts += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="' + r.toFixed(1) + '" fill="none" stroke="var(--damar-gold-bright)" stroke-dasharray="2 2"><title>' + esc(a.name) + '</title></circle>'; });
     (st.watchPoints || []).forEach(function (w) { var p = xy(w.lat, w.lon); pts += '<rect x="' + (p[0] - 3.5).toFixed(1) + '" y="' + (p[1] - 3.5).toFixed(1) + '" width="7" height="7" transform="rotate(45 ' + p[0] + ' ' + p[1] + ')" fill="var(--damar-gold-bright)"><title>' + esc(w.name) + '</title></rect>'; });
+    pts += dots('bmkgEarthquakes', 'var(--status-critical)', function (q) { return Math.max(1.4, (q.magnitude || 0) * 1.0).toFixed(1); }, function (q) { return 'BMKG M' + q.magnitude + ' ' + q.place; });
     pts += dots('earthquakes', 'var(--status-critical)', function (q) { return Math.max(1.2, (q.magnitude || 0) * 0.9).toFixed(1); }, function (q) { return 'M' + q.magnitude + ' ' + q.place; });
+    pts += dots('lightning', 'var(--damar-gold-bright)', 1.1, function (s) { return 'Petir · ' + (s.time || ''); });
     pts += dots('disasters', 'var(--status-warning)', 3, function (e) { return e.alert + ' ' + e.type + ' ' + e.name; });
     pts += dots('cyclones', 'var(--status-warning)', 5, function (c) { return c.name + ' ' + c.classification + ' ' + c.intensityKt + ' kt'; });
     pts += dots('fires', 'var(--status-warning)', 0.8, function () { return 'fire'; });
@@ -135,7 +144,9 @@
   }
   function aircraftTable(res) { return '<div style="font-size:12px;padding:8px 12px;">' + res.count + ' aircraft</div>' + H.table(['Callsign', 'Hex', 'Reg', 'Type', 'Alt ft', 'GS kt', 'Trk'], res.items.slice(0, 15).map(function (f) { return [H.mono(f.callsign || '-'), H.mono(f.hex || '-'), esc(f.registration), esc(f.type) + (f.military ? ' ' + H.statusBadgeHtml('WARN', 'MIL') : ''), fmt(f.altitudeFt), fmt(f.groundSpeedKt), fmt(f.trackDeg, '°')]; }), '-'); }
   var BODIES = {
+    bmkgEarthquakes: function (res) { return H.table(['Mag', 'Wilayah', 'Kedalaman', 'Waktu', 'Potensi (BMKG)'], res.items.slice(0, 12).map(function (q) { return [H.mono(fmt(q.magnitude)), esc(q.place), fmt(q.depthKm, ' km'), esc(new Date(q.time).toLocaleString()), esc(q.potensi || '')]; }), '-'); },
     earthquakes: function (res) { return H.table(['Mag', 'Place', 'Depth', 'Time'], res.items.slice(0, 12).map(function (q) { return [H.mono(fmt(q.magnitude)), esc(q.place), fmt(q.depthKm, ' km'), esc(new Date(q.time).toLocaleString())]; }), '-'); },
+    lightning: function (res) { return '<div style="font-size:12px;padding:8px 12px;">' + res.count + ' strikes (5 min)</div>' + H.table(['Lat', 'Lon', 'Time', 'Type'], res.items.slice(0, 12).map(function (s) { return [fmt(s.lat), fmt(s.lon), esc(new Date(s.time).toLocaleString()), esc(s.type || '')]; }), '-'); },
     cyclones: function (res) { return H.table(['Storm', 'Class', 'Wind kt', 'Pressure', 'Moving', 'Updated'], res.items.map(function (c) { return [esc(c.name), esc(c.classification), fmt(c.intensityKt), fmt(c.pressureMb, ' mb'), fmt(c.movementDir, '°') + ' ' + fmt(c.movementKt, ' kt'), esc(c.updated)]; }), 'No active storms.'); },
     weather: function (res) { var w = res.items[0]; return w ? H.kvList([H.kv('Temperature', fmt(w.temperatureC, ' °C')), H.kv('Sky', fmt(w.symbol)), H.kv('Humidity', fmt(w.humidityPct, ' %')), H.kv('Precipitation (1 h)', fmt(w.precipitationMm, ' mm')), H.kv('Cloud cover', fmt(w.cloudCoverPct, ' %')), H.kv('Wind', fmt(w.windKmh, ' km/h') + ' · ' + fmt(w.windDirDeg, '°'))]) : '-'; },
     disasters: function (res) { return H.table(['Alert', 'Type', 'Event', 'Country', 'Severity', 'From'], res.items.slice(0, 15).map(function (e) { return [H.statusBadgeHtml(e.alert === 'Red' ? 'ERROR' : e.alert === 'Orange' ? 'WARN' : 'OK', e.alert), esc(e.type), esc(e.name), esc(e.country), esc(e.severity), esc(e.from)]; }), '-'); },
@@ -164,8 +175,11 @@
   function keyForm(f) {
     var cred = credOf(f), fields = Array.isArray(cred.fields) ? cred.fields : [];
     var inputs = fields.map(function (k) { return '<input class="input-field" type="password" autocomplete="off" data-md-key="' + f.id + '" data-k="' + k + '" placeholder="' + k + '" style="width:200px;font-family:var(--font-mono);" />'; }).join(' ');
+    var test = md.keyTest[f.id];
+    var testLine = test ? '<div>' + (test.ok ? H.statusBadgeHtml('OK', T('testOk')) : H.statusBadgeHtml('ERROR', T('testFail') + ' · ' + test.code)) + (test.ok && test.strikes != null ? ' <span style="color:var(--text-muted);">' + test.strikes + ' ' + esc(T('strikesNow')) + '</span>' : '') + '</div>' : '';
+    var testBtn = cred.hasKey ? ' ' + H.btn(md.keyTesting[f.id] ? T('testing') : T('testKey'), 'data-md-action="test-key" data-feed="' + f.id + '"') : '';
     return '<div style="display:flex;flex-direction:column;gap:8px;padding:12px;font-size:12px;">' +
-      (cred.hasKey ? '<div>' + H.statusBadgeHtml('OK', T('keyStored')) + ' ' + H.btn(T('forgetKey'), 'data-md-action="forget-key" data-feed="' + f.id + '"') + '</div>'
+      (cred.hasKey ? '<div>' + H.statusBadgeHtml('OK', T('keyStored')) + ' ' + H.btn(T('forgetKey'), 'data-md-action="forget-key" data-feed="' + f.id + '"') + testBtn + '</div>' + testLine
         : '<div><strong>' + esc(T('addKey')) + '</strong> · ' + esc(T('getKey')) + ': ' + H.mono(cred.signupUrl) + '</div><div style="display:flex;gap:8px;flex-wrap:wrap;">' + inputs + H.btn(T('saveKey'), 'data-md-action="save-key" data-feed="' + f.id + '"', 'btn-primary') + '</div>') + '</div>';
   }
   function feedPanel(f) {
@@ -231,7 +245,12 @@
       '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 12px;font-size:12px;">' + (d.watchPoints.length < 200 ? H.btn(T('addPoint'), 'data-md-action="add-point"') : '') +
       '<span style="flex:1"></span><label>' + esc(T('importLink')) + ' ' + input('data-md-import-url placeholder="https://www.google.com/maps/…" maxlength="2000"', md.importUrl, '300px') + '</label>' +
       '<select class="input-field" data-md-import-profile style="width:auto;"><option value="asset"' + (md.importProfile === 'asset' ? ' selected' : '') + '>' + esc(T('asset')) + '</option><option value="personal"' + (md.importProfile === 'personal' ? ' selected' : '') + '>' + esc(T('personal')) + '</option></select>' +
-      H.btn(T('importBtn'), 'data-md-action="import-link"') + '</div><div style="font-size:11px;color:var(--text-muted);padding:0 12px 10px;">' + esc(T('importHint')) + '</div>', { span: 12, flush: true });
+      H.btn(T('importBtn'), 'data-md-action="import-link"') + '</div><div style="font-size:11px;color:var(--text-muted);padding:0 12px 6px;">' + esc(T('importHint')) + '</div>' +
+      '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:0 12px;font-size:12px;"><label>' + esc(T('pasteLabel')) + ' ' + input('data-md-paste placeholder="https://maps.app.goo.gl/… · Plus Code · -6.17, 106.82" maxlength="2000"', md.pasteInput, '340px') + '</label>' +
+      H.btn(T('pasteBtn'), 'data-md-action="paste-check"') +
+      (md.pastePreview ? '<span>' + esc(md.pastePreview.name) + ' · ' + H.mono(md.pastePreview.lat + ', ' + md.pastePreview.lon) + '</span>' + H.btn(T('pasteAdd'), 'data-md-action="paste-add"', 'btn-primary') : '') +
+      (md.pasteError ? '<span style="color:var(--status-critical);">' + esc(T('pasteErr')) + ' · ' + esc(md.pasteError) + '</span>' : '') + '</div>' +
+      '<div style="font-size:11px;color:var(--text-muted);padding:6px 12px 10px;">' + esc(T('pasteHint')) + '</div>', { span: 12, flush: true });
   }
   function alertsPanel(d) {
     var a = d.alerts; if (!a) return '';
@@ -322,6 +341,19 @@
       Array.prototype.forEach.call(document.querySelectorAll('[data-md-key="' + f + '"]'), function (el) { body[el.getAttribute('data-k')] = el.value; el.value = ''; });
       H.post('/api/r9/mata-dewa/keys/' + f, body).then(function (r) { delete md.feeds[f]; after(r, T('keyStored')); }); },
     'forget-key': function (b) { var f = b.getAttribute('data-feed'); H.post('/api/r9/mata-dewa/keys/' + f, { forget: true }).then(function (r) { delete md.feeds[f]; after(r, 'OK'); }); },
+    'test-key': function (b) { var f = b.getAttribute('data-feed'); if (md.keyTesting[f]) return; md.keyTesting[f] = true; H.refresh();
+      H.post('/api/r9/mata-dewa/keys/' + f + '/test', {}).then(function (r) { md.keyTesting[f] = false; md.keyTest[f] = r.ok ? r.data : { ok: false, code: r.error || 'ERROR' }; H.refresh(); }); },
+    'paste-check': function () { var v = md.pasteInput; if (!v) return; md.pasteError = ''; md.pastePreview = null;
+      H.post('/api/r9/mata-dewa/watchpoints/resolve', { input: v }).then(function (r) {
+        if (r.ok && r.data && r.data.points && r.data.points.length) { var p0 = r.data.points[0]; md.pastePreview = { name: p0.name, lat: p0.lat, lon: p0.lon, kind: r.data.kind, sourceUrl: r.data.sourceUrl || null }; }
+        else md.pasteError = (r && r.error) || 'ERROR';
+        H.refresh(); }); },
+    'paste-add': function () { var d = md.draft, pv = md.pastePreview; if (!d || !pv || d.watchPoints.length >= 200) return;
+      var base = String(pv.name || 'Titik pantau').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 18) || 'titik'; var id = 'wp-' + base, n = 2;
+      while (d.watchPoints.some(function (w) { return w.id === id; })) id = 'wp-' + base.slice(0, 15) + '-' + (n++);
+      var point = { id: id, name: String(pv.name || 'Titik pantau').slice(0, 40), lat: pv.lat, lon: pv.lon, radiusKm: md.importProfile === 'personal' ? 25 : 50, profile: md.importProfile };
+      if (pv.sourceUrl) point.sourceUrl = pv.sourceUrl;
+      d.watchPoints.push(point); md.pastePreview = null; md.pasteInput = ''; H.refresh(); },
     'add-camera': function () { var cf = md.camForm, body = { action: 'add', name: val('[data-md-cam="name"]'), kind: cf.kind, url: val('[data-md-cam="url"]'), alpr: !!cf.alpr }, u = val('[data-md-cam="username"]');
       if (u) { body.username = u; body.password = val('[data-md-cam="password"]'); }
       H.post('/api/r9/mata-dewa/cameras', body).then(function (r) { if (r.ok) md.camForm = { kind: 'snapshot' }; after(r, 'Camera added.'); }); },
@@ -382,6 +414,7 @@
       if (t.hasAttribute('data-md-filter')) { md.filter = t.value.slice(0, 60); return; }
       if (t.getAttribute('data-md-cam') === 'name' || t.getAttribute('data-md-cam') === 'url') { md.camForm[t.getAttribute('data-md-cam')] = t.value; return; }
       if (t.hasAttribute('data-md-import-url')) { md.importUrl = t.value; return; }
+      if (t.hasAttribute('data-md-paste')) { md.pasteInput = t.value; return; }
       if (!md.draft) return;
       if (t.hasAttribute('data-md-refresh')) md.draft.refreshSec[t.getAttribute('data-md-refresh')] = parseInt(t.value, 10);
       else if (t.hasAttribute('data-md-num')) md.draft[t.getAttribute('data-md-num')] = parseInt(t.value, 10);

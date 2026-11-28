@@ -148,7 +148,7 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
           if (st.ok && st.body?.success === true) {
             mataDewa = { status: st.body.data, feeds: {} };
             const enabledFeeds = new Set((mataDewa.status.feeds || []).filter(f => f.enabled).map(f => f.id));
-            const want = mataDewa.status.consent ? ['weather', 'earthquakes', 'disasters', 'cyclones', 'airQuality', 'launches', 'satellites', 'flights', 'imagery'].filter(id => enabledFeeds.has(id)) : [];
+            const want = mataDewa.status.consent ? ['weather', 'bmkgEarthquakes', 'earthquakes', 'disasters', 'cyclones', 'airQuality', 'launches', 'satellites', 'flights', 'imagery'].filter(id => enabledFeeds.has(id)) : [];
             await Promise.all(want.map(async fid => {
               try { const fr = await get('/api/r9/mata-dewa/feeds/' + fid); if (fr.ok && fr.body?.success === true) mataDewa.feeds[fid] = fr.body.data; } catch {}
             }));

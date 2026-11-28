@@ -19,7 +19,8 @@ The "Commercial" column is a summary of the source's terms, not legal advice.
 
 | # | GEV capability | DAMAR feed or route | Source host | Key | Rate limit (DAMAR floor) | Licence | Commercial | Earlier DAMAR code | Status |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | Earthquakes | `earthquakes` | earthquake.usgs.gov | none | ≥ 60 s | US public domain | yes | usgs provider | **default** |
+| 1 | Earthquakes | `earthquakes` | earthquake.usgs.gov | none | ≥ 60 s | US public domain | yes | usgs provider | **default** (global backfill behind BMKG since 2026-11-28: USGS items duplicating a BMKG report are dropped in the alert path and the Presence list) |
+| 1b | Earthquakes, Indonesia (primary) | `bmkgEarthquakes` | data.bmkg.go.id | none | ≥ 60 s | BMKG open data | yes | bmkg provider | **default**, first in layer order (Owner rule 2026-11-28); BMKG's tsunami Potensi wording is carried verbatim |
 | 2 | Weather / wind | `weather` (MET Norway Locationforecast 2.0) | api.met.no | none; identifying User-Agent | ≥ 600 s, cached | CC BY 4.0 / NLOD 2.0 | yes | openMeteo provider (replaced) | **default** |
 | 3 | Cyclones and disasters (all basins incl. western Pacific) | `disasters` (GDACS: TC, EQ, FL, VO, DR, WF) | www.gdacs.org | none | ≥ 600 s | GDACS terms; EC JRC reuse policy (CC BY 4.0) unless stated | likely; confirm with JRC before a commercial release | — | **default** |
 | 4 | Satellites | `satellites` (one CelesTrak group; mean elements) | celestrak.org | none | ≥ 2 h | public; citation | yes | celestrak provider | **default** |
@@ -34,7 +35,8 @@ The "Commercial" column is a summary of the source's terms, not legal advice.
 | 13 | Live vessels (AIS) | `vessels` | stream.aisstream.io (wss) | AISStream key | ≥ 120 s | beta, no terms | unclear | keyed provider | **v1-key** |
 | 14 | Active fires | `fires` | firms.modaps.eosdis.nasa.gov | FIRMS MAP_KEY | ≥ 600 s | NASA open data | yes | keyed provider | **v1-key** |
 | 15 | Traffic flow | `traffic` | api.tomtom.com | TomTom key | ≥ 120 s | TomTom terms | per plan | keyed provider | **v1-key** |
-| 16 | CCTV: official public cameras | `/cameras/public/{tfl-london, fintraffic}?q=&page=` (server-side search, 24 per page; latest still only) | api.tfl.gov.uk; s3-eu-west-1.amazonaws.com (path `/jamcams.tfl.gov.uk/` only); tie.digitraffic.fi; weathercam.digitraffic.fi | none | list 6 h, still 60 s | TfL Open Data terms; Fintraffic CC BY 4.0 | TfL: per its terms; Fintraffic: yes | cctv media (concept) | **v1** (regions chosen by the Owner; no ALPR) |
+| 16 | CCTV: official public cameras | `/cameras/public/{tfl-london, fintraffic, bpjt-tol, atcs-bandung, cctv-jogja}?q=&page=` (server-side search, 24 per page; latest still only) | api.tfl.gov.uk; s3-eu-west-1.amazonaws.com (path `/jamcams.tfl.gov.uk/` only); tie.digitraffic.fi; weathercam.digitraffic.fi; bpjt.pu.go.id; jmlive.jasamarga.com; atcs-dishub.bandung.go.id; cctv.jogjakota.go.id; cctvjss.jogjakota.go.id | none | list 6 h, still 60 s | TfL Open Data terms; Fintraffic CC BY 4.0; Indonesian portals: official public viewing portals | TfL: per its terms; Fintraffic: yes; Indonesian: public viewing | cctv media (concept) | **v1** (regions chosen by the Owner; no ALPR). Indonesian sources added 2026-11-28 (Owner: Indonesia first): BPJT Kementerian PU toll cameras, Dishub Kota Bandung ATCS, Pemerintah Kota Yogyakarta. The Indonesian publishers stream HLS for public viewing; DAMAR grabs one still frame per request via ffmpeg and never records. Checked and NOT integrated: RTTMC Kemenhub (domains dead/unreachable), Bina Marga CCTV page (404), jasamargalive.com as a portal (expired TLS certificate; its streams are reached via BPJT), ATCS Padang (unreachable), ATCS Cirebon (404), Surabaya SITS / Kota Bogor CCTV (subdomains do not resolve), Semarang (HTTP 500), Denpasar (403), private aggregators such as lewatmana.com (not the publisher) |
+| 37 | Lightning | `lightning` | data.api.xweather.com | Xweather client ID + secret | ≥ 60 s; provider window: past 5 min, radius ≤ 100 km | Xweather terms | per plan | — | **v1-key** (keyed-only by design: Blitzortung's terms refuse third-party use of its live data, see THIRD_PARTY_NOTICES; strikes near a watch point alert via the storm rule family) |
 | 17 | Owner's own cameras | `/cameras`, `/cameras/own/<id>/frame` | Owner-registered URL only (LAN allowed; loopback and link-local refused) | camera credentials (DPAPI) | on demand | — | — | cctv media | **v1**: HTTP snapshot or MJPEG with Basic or Digest (MD5 / SHA-256, sent only after a 401 challenge); RTSP via optional ffmpeg (credentials go in a one-shot private ffconcat file, never on the command line) |
 | 18 | ALPR | `/alpr`: log, crops, watchlist, alerts, export, delete, install-engine | local only; install downloads from pypi.org, files.pythonhosted.org, github.com and GitHub asset hosts | — | scan interval ≥ 5 s | fast-alpr 0.4.0 stack (MIT); weights need a provenance review | see THIRD_PARTY_NOTICES | — | **v1**: Owner cameras only, after the CCTV and ALPR notices; engine installed on demand |
 | 19 | Mapped ALPR camera locations (OSM / DeFlock) | — | — | — | — | — | — | — | **out**: maps other people's surveillance devices |
@@ -79,6 +81,14 @@ The "Commercial" column is a summary of the source's terms, not legal advice.
 - `api.met.no`
 - `www.gdacs.org`
 - `api.openaq.org`
+- `data.bmkg.go.id`
+- `api.bmkg.go.id`
+- `data.api.xweather.com`
+- `bpjt.pu.go.id`
+- `jmlive.jasamarga.com`
+- `atcs-dishub.bandung.go.id`
+- `cctv.jogjakota.go.id`
+- `cctvjss.jogjakota.go.id`
 
 Every public fetch applies these rules:
 

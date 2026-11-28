@@ -2707,23 +2707,17 @@
         else {
           const hidden = window.__mdwHidden || (window.__mdwHidden = new Set());
           const LAYERS = [
-            ['imagery', 'Citra Satelit', !!md.imagery?.items?.length], ['points', 'Titik Pantau', !!((md.watchPoints || []).length || (md.areas || []).length)],
-            ['weather', 'Cuaca', !!md.weather?.items?.length], ['quakes', 'Gempa', !!md.earthquakes?.items?.length], ['disasters', 'Bencana', !!md.disasters?.items?.length],
+            ['quakes', 'Gempa', !!md.earthquakes?.items?.length], ['weather', 'Cuaca', !!md.weather?.items?.length],
+            ['points', 'Titik Pantau', !!((md.watchPoints || []).length || (md.areas || []).length)], ['imagery', 'Citra Satelit', !!md.imagery?.items?.length], ['disasters', 'Bencana', !!md.disasters?.items?.length],
             ['cyclones', 'Siklon', !!md.cyclones?.items?.length], ['air', 'Udara', !!md.airQuality?.items?.length], ['flights', 'Pesawat', !!md.flights],
             ['sats', 'Satelit', !!md.satellites], ['launches', 'Peluncuran', !!md.launches?.items?.length], ['alerts', 'Peringatan', !!md.alerts?.items?.length]
           ];
           layerBar = `<div class=\"mdw-layers\">${LAYERS.filter(l => l[2]).map(l => `<button class=\"mdw-lchip${hidden.has(l[0]) ? '' : ' on'}\" onclick=\"window.__mdwToggle('${l[0]}')\">${l[1]}</button>`).join('')}</div>`;
           const show = k => !hidden.has(k);
           if (md.imagery?.chip) window.__mdwChip = { url: md.imagery.chip, for: md.imagery.chipFor || '' };
-          if (show('imagery') && md.imagery?.items?.length) {
-            const it0 = md.imagery.items[0], chip = window.__mdwChip;
-            widgets += `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Citra satelit titik pantau</div>${chip && chip.for === it0.name ? `<img class=\"mdw-img\" src=\"${chip.url}\" alt=\"${esc(it0.name)}\" />` : ''}<div class=\"mdw-loc\">${esc(it0.name)}</div><div class=\"mdw-cond\">${esc(it0.product || '')} · Lintasan ${esc(it0.day || '')}${it0.cloudCoverPct != null ? ' · Awan ' + it0.cloudCoverPct + '%' : ''}</div><div class=\"mdw-note\">Citra bertanggal dari lintasan satelit terbaru, bukan pantauan langsung.</div>${md.imagery.items.slice(1).map(it => `<div class=\"mdw-row\"><div class=\"mdw-row-main\">${esc(it.name)}</div><div class=\"mdw-row-sub\">${esc(it.day || '')}</div></div>`).join('')}</div>`;
-            if (md.imagery.attribution) attrs.push(md.imagery.attribution);
-          }
-          if (show('points') && ((md.watchPoints || []).length || (md.areas || []).length)) {
-            const rows = (md.areas || []).map(a => `<div class=\"mdw-row\"><div class=\"mdw-row-main\">${esc(a.name)}</div><div class=\"mdw-row-sub\">Area</div></div>`).join('') +
-              (md.watchPoints || []).map(w2 => `<div class=\"mdw-row\"><div class=\"mdw-row-main\">${esc(w2.name)}</div><div class=\"mdw-row-sub\">${w2.profile === 'asset' ? 'Aset' : 'Personal'}</div></div>`).join('');
-            widgets += `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Titik pantau</div>${rows}<div class=\"mdw-note\">Kelola titik dan aturannya di Control, menu Mata Dewa.</div></div>`;
+          if (show('quakes') && md.earthquakes?.items?.length) {
+            widgets += `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Gempa terbaru</div>${md.earthquakes.items.map(q => `<div class=\"mdw-row\"><span class=\"mdw-chip\">M${q.mag ?? '-'}</span><div class=\"mdw-row-main\">${esc(q.place || '-')}</div><div class=\"mdw-row-sub\">${q.depthKm != null ? q.depthKm + ' km' : ''}${q.source ? ' · ' + q.source : ''}</div></div>`).join('')}</div>`;
+            if (md.earthquakes.attribution) attrs.push(md.earthquakes.attribution);
           }
           const w = md.weather?.items?.[0];
           if (show('weather') && w) {
@@ -2731,9 +2725,15 @@
             widgets += `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Cuaca titik pantau</div>${(md.weather.items || []).filter(x => x.temperatureC != null).length > 1 ? '<canvas class="spark" id="mdTempSpark"></canvas>' : ''}<div class=\"mdw-weather-main\"><div class=\"mdw-weather-icon\">${iconFor(w.sky)}</div><div><div class=\"mdw-temp\">${w.temperatureC != null ? w.temperatureC + '°' : '-'}</div><div class=\"mdw-loc\">${esc(md.areas[0]?.name || 'Titik pantau')}</div><div class=\"mdw-cond\">${esc(w.sky || '')}</div>${md.areas[0]?.seeded ? `<div class=\"mdw-cond\">Titik bawaan Damar. Atur atau ganti di Control, menu Mata Dewa.</div>` : ''}</div></div>${fc}</div>`;
             if (md.weather.attribution) attrs.push(md.weather.attribution);
           }
-          if (show('quakes') && md.earthquakes?.items?.length) {
-            widgets += `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Gempa terbaru</div>${md.earthquakes.items.map(q => `<div class=\"mdw-row\"><span class=\"mdw-chip\">M${q.mag ?? '-'}</span><div class=\"mdw-row-main\">${esc(q.place || '-')}</div><div class=\"mdw-row-sub\">${q.depthKm != null ? q.depthKm + ' km' : ''}</div></div>`).join('')}</div>`;
-            if (md.earthquakes.attribution) attrs.push(md.earthquakes.attribution);
+          if (show('points') && ((md.watchPoints || []).length || (md.areas || []).length)) {
+            const rows = (md.areas || []).map(a => `<div class=\"mdw-row\"><div class=\"mdw-row-main\">${esc(a.name)}</div><div class=\"mdw-row-sub\">Area</div></div>`).join('') +
+              (md.watchPoints || []).map(w2 => `<div class=\"mdw-row\"><div class=\"mdw-row-main\">${esc(w2.name)}</div><div class=\"mdw-row-sub\">${w2.profile === 'asset' ? 'Aset' : 'Personal'}</div></div>`).join('');
+            widgets += `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Titik pantau</div>${rows}<div class=\"mdw-note\">Kelola titik dan aturannya di Control, menu Mata Dewa.</div></div>`;
+          }
+          if (show('imagery') && md.imagery?.items?.length) {
+            const it0 = md.imagery.items[0], chip = window.__mdwChip;
+            widgets += `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Citra satelit titik pantau</div>${chip && chip.for === it0.name ? `<img class=\"mdw-img\" src=\"${chip.url}\" alt=\"${esc(it0.name)}\" />` : ''}<div class=\"mdw-loc\">${esc(it0.name)}</div><div class=\"mdw-cond\">${esc(it0.product || '')} · Lintasan ${esc(it0.day || '')}${it0.cloudCoverPct != null ? ' · Awan ' + it0.cloudCoverPct + '%' : ''}</div><div class=\"mdw-note\">Citra bertanggal dari lintasan satelit terbaru, bukan pantauan langsung.</div>${md.imagery.items.slice(1).map(it => `<div class=\"mdw-row\"><div class=\"mdw-row-main\">${esc(it.name)}</div><div class=\"mdw-row-sub\">${esc(it.day || '')}</div></div>`).join('')}</div>`;
+            if (md.imagery.attribution) attrs.push(md.imagery.attribution);
           }
           if (show('disasters') && md.disasters?.items?.length) {
             widgets += `<div class=\"mdw-widget\"><div class=\"mdw-wtitle\">Peringatan bencana</div>${md.disasters.items.map(d => `<div class=\"mdw-row mdw-row-stack\"><div class=\"mdw-row-main\">${esc(d.event || '-')}</div><div class=\"mdw-row-sub\">${esc([d.country, d.severity].filter(Boolean).join(' · '))}</div></div>`).join('')}</div>`;
