@@ -22,6 +22,7 @@
       modeNote: 'Patrols run on demand; there is no periodic patrol schedule in the backend at this time.',
       modeNoteBerkala: 'Patrols run periodically from the daemon: System every %s min, Network every %s min.',
       modeNoteBerkalaPlain: 'Patrols run periodically from the daemon.',
+      engineLlm: 'LLM assessment', engineDet: 'Deterministic assessment', llmMiss: 'LLM unreachable this cycle', ownModel: 'Werkudara’s own model',
       incidents: 'Defence events', incidentsEmpty: 'No incidents recorded in the detection engine at this time.', incidentsWaiting: 'Waiting for the daemon projection to be readable.',
       activity: 'Werkudara activity', totalRuns: 'Recorded tasks', completed: 'Completed', failed: 'Failed', lastRun: 'Most recent',
       activityEmpty: 'No Werkudara task recorded on this Core session yet.',
@@ -39,6 +40,7 @@
       modeNote: 'Patroli berjalan atas permintaan; belum ada jadwal berkala di backend saat ini.',
       modeNoteBerkala: 'Patroli berjalan berkala dari daemon: Sistem tiap %s menit, Jaringan tiap %s menit.',
       modeNoteBerkalaPlain: 'Patroli berjalan berkala dari daemon.',
+      engineLlm: 'Penilaian LLM', engineDet: 'Penilaian deterministik', llmMiss: 'LLM tidak tercapai siklus ini', ownModel: 'Model pilihan Werkudara sendiri',
       incidents: 'Kejadian pertahanan', incidentsEmpty: 'Tidak ada insiden tercatat di mesin deteksi saat ini.', incidentsWaiting: 'Menunggu proyeksi daemon terbaca.',
       activity: 'Aktivitas Werkudara', totalRuns: 'Tugas tercatat', completed: 'Selesai', failed: 'Gagal', lastRun: 'Terakhir',
       activityEmpty: 'Belum ada tugas Werkudara tercatat pada sesi Core ini.',
@@ -88,10 +90,16 @@
       H.kv(T('failed'), String(wk.failed)), H.kv(T('lastRun'), when(wk.lastRunAt)), H.kv(T('source'), T('srcPatrol'))])
       : '<div style="font-size:12.5px;color:var(--text-secondary);">' + esc(T('activityEmpty')) + '</div>', { span: 7 });
     var runRow = function (r) { return [esc(when(r.createdAt)), H.statusBadgeHtml(r.state, stateLabel(r.state)), esc(cut(r.task, 140)), esc(cut(r.outputPreview || r.error || '', 160))]; };
+    var engineNote = function (r) {
+      if (r.engine === 'llm') return T('engineLlm') + (r.model ? ' · ' + r.model : '') + (r.modelSource === 'pandawa' ? ' · ' + T('ownModel') : '');
+      if (r.source === 'daemon-otomatis') return T('engineDet') + (r.llmError ? ' · ' + T('llmMiss') + ': ' + r.llmError : '');
+      return '';
+    };
+    var patrolRow = function (r) { var note = engineNote(r); return [esc(when(r.createdAt)), H.statusBadgeHtml(r.state, stateLabel(r.state)), esc(cut(r.task, 140)), esc(cut((r.outputPreview || r.error || '') + (note ? ' [' + note + ']' : ''), 220))]; };
     var lt = d.patroliTerbaru || {};
     var latestRows = [['kindSistem', lt.sistem], ['kindJaringan', lt.jaringan], ['kindUmum', lt.umum]].map(function (pair) {
       var r = pair[1];
-      return [esc(T(pair[0])), r ? H.statusBadgeHtml(r.state, stateLabel(r.state)) : esc(T('noKind')), r ? esc(when(r.createdAt)) : '-', r ? esc(cut(r.outputPreview || r.error || r.task, 160)) : '-'];
+      return [esc(T(pair[0])), r ? H.statusBadgeHtml(r.state, stateLabel(r.state)) : esc(T('noKind')), r ? esc(when(r.createdAt)) : '-', r ? esc(cut((r.outputPreview || r.error || r.task) + (engineNote(r) ? ' [' + engineNote(r) + ']' : ''), 220)) : '-'];
     });
     var modeNote = T('modeNote');
     if (d.modePatroli === 'berkala') {
@@ -102,7 +110,7 @@
     }
     html += H.panel(T('latestPatrol'), H.table([T('kind'), T('state'), T('when'), T('result')], latestRows) +
       '<div style="font-size:11.5px;color:var(--text-muted);padding:8px 12px;">' + esc(modeNote) + '</div>', { span: 12, flush: true });
-    html += H.panel(T('patrol'), H.table([T('when'), T('state'), T('task'), T('result')], (d.patroli || []).map(runRow), T('patrolEmpty')), { span: 12, flush: true });
+    html += H.panel(T('patrol'), H.table([T('when'), T('state'), T('task'), T('result')], (d.patroli || []).map(patrolRow), T('patrolEmpty')), { span: 12, flush: true });
     var incBody;
     if (!dcd.available) incBody = '<div style="padding:18px;text-align:center;color:var(--text-muted);font-size:12px;">' + esc(T('incidentsWaiting')) + '</div>';
     else incBody = H.table([T('when'), T('risk'), T('state'), T('summary')], (dcd.incidents || []).map(function (i) {

@@ -383,8 +383,17 @@ router.get("/cyber/posture", async (req, res, next) => {
                     task: clean(r.task, 120),
                     outputPreview: clean(r.summary, 300),
                     error: clean(r.error, 80),
-                    provider: null,
-                    model: null,
+                    // Which engine judged this patrol and, for LLM
+                    // patrols, which model and where the choice came
+                    // from ('pandawa' assignment vs 'daemon' provider
+                    // selection). Records written before the LLM build
+                    // carry no engine; surfaces read that as the
+                    // deterministic assessments they were.
+                    engine: clean(r.engine, 16),
+                    provider: clean(r.provider, 40),
+                    model: clean(r.model, 80),
+                    modelSource: clean(r.modelSource, 16),
+                    llmError: clean(r.llmError, 80),
                     createdAt: Number.isSafeInteger(r.startedAt) ? r.startedAt : null,
                     updatedAt: Number.isSafeInteger(r.finishedAt) ? r.finishedAt : null,
                     source: "daemon-otomatis"
@@ -402,7 +411,12 @@ router.get("/cyber/posture", async (req, res, next) => {
                     mode: clean(st.mode, 20) || "nonaktif",
                     startedAt: Number.isSafeInteger(st.startedAt) ? st.startedAt : null,
                     sistem: kindView(st.sistem),
-                    jaringan: kindView(st.jaringan)
+                    jaringan: kindView(st.jaringan),
+                    llm: st.llm && typeof st.llm === "object" ? {
+                        provider: clean(st.llm.provider, 40),
+                        model: clean(st.llm.model, 80),
+                        modelSource: clean(st.llm.modelSource, 16)
+                    } : null
                 };
             }
         } catch {}

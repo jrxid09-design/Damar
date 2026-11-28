@@ -90,6 +90,7 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
 
   const view = r => ({ runId: r.runId, requestId: r.requestId, worker: r.worker, entityId: 'pandawa:' + r.worker, state: r.state, cancelRequested: !!r.cancelRequested,
     reason: r.reason || null, provider: r.provider || null, model: r.model || null, outputPreview: r.outputPreview || null, error: r.error || null,
+    engine: r.engine || null, modelSource: r.modelSource || null, llmError: r.llmError || null,
     attempts: r.attempts ?? null, createdAt: r.createdAt, updatedAt: r.updatedAt });
   function usageFor(cliSession) {
     const rows = [...[...receipts.values()].filter(r => r.cliSession === cliSession), ...(team?.receiptsFor?.(cliSession) || [])];   // + Pandawa discussion receipts
@@ -278,7 +279,7 @@ function createR9Routes({ directory, credentials, hub, registry, canonicalUsageT
         const kindOf = r => r.kind || patrolKind(r);
         const patrols = [...wk.filter(r => patrolKind(r)), ...daemonPatrols]
           .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-        const latestOf = kind => { const hit = patrols.find(r => kindOf(r) === kind); return hit ? row(hit) : null; };
+        const latestOf = kind => { const hit = patrols.find(r => kindOf(r) === kind); return hit ? { ...row(hit), ...(hit.source ? { source: hit.source } : {}) } : null; };
         const loopState = dcd.available && dcd.patrolLoop && typeof dcd.patrolLoop === 'object' ? dcd.patrolLoop : null;
         const modePatroli = loopState && loopState.mode === 'berkala' ? 'berkala' : 'atas-permintaan';
         const jadwalPatroli = modePatroli === 'berkala' ? {

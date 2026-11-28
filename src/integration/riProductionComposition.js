@@ -38,7 +38,8 @@
  *      Law: NO FREEZE APPLIED ON COMPOSITION, AUTHORITY_SOURCE_COUNT = 1
  *
  *   6. Werkudara patrol loop (owner direction 2026-11-28: patrols are
- *      continuous, not on-demand):
+ *      continuous, not on-demand; assessment by LLM per the same day's
+ *      later order, model resolved by src/integration/patrolModel):
  *      Owner: src/integration/cyberPatrolLoop, wired here at composition
  *      Records: durable journal in the composed ACC store (`cyber:patrol:*`)
  *      Read seam: GET /api/ui/cyber/posture (patroli + patrolLoop)
@@ -172,10 +173,16 @@ async function ensureRuntimeIntegrationComposed({ host = null, acc = null, audit
         // JARINGAN patrols on engine-level timers in this composition
         // (never an external cron or watchdog). Starting it must never
         // break the composition: a patrol fault degrades the loop, not
-        // the daemon.
+        // the daemon. Patrol assessment is the model's work (owner
+        // order 2026-11-28 17:41 WIB): the patrolModel seam resolves
+        // Werkudara's model per cycle (its per-Pandawa assignment
+        // first, the daemon's provider selection as fallback) and
+        // judges the gathered evidence; a cycle whose LLM call fails
+        // records a deterministic assessment under its own label.
         let patrol = null;
         try {
-            patrol = createCyberPatrolLoop({ acc: resolvedAcc, clock, broadcast: broadcastEvent });
+            const { createPatrolLlm } = require("./patrolModel");
+            patrol = createCyberPatrolLoop({ acc: resolvedAcc, clock, broadcast: broadcastEvent, llm: createPatrolLlm() });
             patrol.start();
         } catch {
             patrol = null;

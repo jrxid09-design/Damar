@@ -197,6 +197,8 @@ function projectCyber(c) {
   if (!c || typeof c !== 'object') return null;
   const runRow = r => ({ state: text(r.state, 20), task: text(r.task, 300), outputPreview: text(r.outputPreview, 240),
     error: text(r.error, 120), provider: text(r.provider, 40), model: text(r.model, 60),
+    engine: text(r.engine, 16) || null, modelSource: text(r.modelSource, 16) || null, llmError: text(r.llmError, 80) || null,
+    source: text(r.source, 24) || null,
     createdAt: Number.isSafeInteger(r.createdAt) ? r.createdAt : null, updatedAt: Number.isSafeInteger(r.updatedAt) ? r.updatedAt : null });
   const wk = c.werkudara && typeof c.werkudara === 'object' ? c.werkudara : {};
   const d = c.dcd && typeof c.dcd === 'object' ? c.dcd : { available: false, reason: 'BINDING_TIDAK_TERSEDIA' };

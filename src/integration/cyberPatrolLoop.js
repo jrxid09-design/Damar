@@ -12,13 +12,23 @@
  *   - PATROLI JARINGAN network state assessment (listeners, connections)
  *
  * Every cycle gathers REAL read-only evidence from the host (os module,
- * netstat, tasklist), evaluates it with deterministic rules, and appends
- * a genuine patrol record to the durable journal in the canonical ACC
- * store. Records are never fabricated: a cycle whose evidence cannot be
- * gathered is recorded FAILED with the reason, and a failed cycle never
- * stops the loop or the daemon. Patrols are assessments only; any action
- * beyond assessment stays behind the Authority Gate as designed, exactly
- * like the manual patrols recorded through the Pandawa registry.
+ * netstat, tasklist) and has it ASSESSED BY THE MODEL: Werkudara's
+ * judgment, findings, severity and Indonesian summary come from an LLM
+ * call (owner order 2026-11-28 17:41 WIB: patrols must use an LLM). The
+ * model is chosen per cycle by the single named resolver in
+ * patrolModel.js (Werkudara's own per-Pandawa assignment first, the
+ * daemon's provider selection as fallback), and every record names the
+ * engine that produced it: engine 'llm' with provider + model +
+ * modelSource, or engine 'deterministik' when the LLM could not be
+ * reached on that cycle — in which case the deterministic rules in this
+ * module produce the assessment and the record carries the failure
+ * reason (llmError). A deterministic record is never presented as an
+ * LLM patrol. Records are appended to the durable journal in the
+ * canonical ACC store. A cycle whose evidence cannot be gathered is
+ * recorded FAILED with the reason, and a failed cycle never stops the
+ * loop or the daemon. Patrols are assessments only; any action beyond
+ * assessment stays behind the Authority Gate as designed, exactly like
+ * the manual patrols recorded through the Pandawa registry.
  *
  * The cadence lives in ONE named place: PATROL_CADENCE below. The daemon
  * composition has no settings surface, so the intervals are constants
@@ -205,9 +215,13 @@ async function gatherSistem() {
 /**
  * Create the patrol loop. `acc` is the canonical ACC store of the
  * composition (durable journal); `clock` and `broadcast` are the
- * composition's own seams. Nothing in here throws into the caller.
+ * composition's own seams. `llm` is the patrolModel.js seam
+ * ({ resolveTarget, assess }): when present, each cycle's evidence is
+ * assessed by the model; when absent or failing, the cycle falls back
+ * to the deterministic assessment under its own label. Nothing in here
+ * throws into the caller.
  */
-function createCyberPatrolLoop({ acc = null, clock = () => Date.now(), broadcast = null, env = process.env } = {}) {
+function createCyberPatrolLoop({ acc = null, clock = () => Date.now(), broadcast = null, env = process.env, llm = null } = {}) {
     const cadence = {
         sistemMs: resolveInterval(env.DAMAR_CYBER_PATROL_SISTEM_MS, PATROL_CADENCE.sistemMs),
         jaringanMs: resolveInterval(env.DAMAR_CYBER_PATROL_JARINGAN_MS, PATROL_CADENCE.jaringanMs),
@@ -223,6 +237,10 @@ function createCyberPatrolLoop({ acc = null, clock = () => Date.now(), broadcast
     let journal = [];
     let journalLoaded = false;
     let persistChain = Promise.resolve();
+    // The model the most recent cycle resolved (names only, never a key):
+    // surfaced through state() so the projections can say which model the
+    // patrols judge with and where that choice came from.
+    let llmState = null;
 
     async function loadJournal() {
         if (journalLoaded) return;
@@ -254,7 +272,36 @@ function createCyberPatrolLoop({ acc = null, clock = () => Date.now(), broadcast
         try {
             await loadJournal();
             const gathered = kind === "sistem" ? await gatherSistem() : await gatherJaringan();
-            const assessed = kind === "sistem" ? assessSistem(gathered.snapshot) : assessJaringan(gathered.snapshot);
+            const deterministic = kind === "sistem" ? assessSistem(gathered.snapshot) : assessJaringan(gathered.snapshot);
+            // Assessment by the model when the patrol LLM seam is wired:
+            // the resolver picks the model fresh each cycle (Werkudara's
+            // assignment first, daemon provider selection as fallback).
+            // Any failure keeps the deterministic assessment, labeled as
+            // such, with the reason recorded — never dressed as LLM work.
+            let assessed = deterministic;
+            let engine = "deterministik";
+            let modelFields = { provider: null, model: null, modelSource: null };
+            let llmError = null;
+            if (llm && typeof llm.resolveTarget === "function" && typeof llm.assess === "function") {
+                let target = null;
+                try { target = llm.resolveTarget(); } catch { target = null; }
+                if (target) {
+                    modelFields = { provider: target.provider || null, model: target.model || null, modelSource: target.modelSource || null };
+                    llmState = { ...modelFields };
+                    if (target.model && target.endpoint) {
+                        try {
+                            assessed = await llm.assess({ kind, evidence: gathered.evidence, target });
+                            engine = "llm";
+                        } catch (err) {
+                            llmError = String(err && err.message ? err.message : err).slice(0, 80);
+                        }
+                    } else {
+                        llmError = target.unavailableReason || "LLM_TIDAK_TERSEDIA";
+                    }
+                } else {
+                    llmError = "LLM_RESOLVER_GAGAL";
+                }
+            }
             record = {
                 patrolId: "pat_" + crypto.randomUUID().replace(/-/g, ""),
                 kind,
@@ -267,6 +314,11 @@ function createCyberPatrolLoop({ acc = null, clock = () => Date.now(), broadcast
                 summary: assessed.summary,
                 findings: assessed.findings,
                 evidence: gathered.evidence,
+                engine,
+                provider: modelFields.provider,
+                model: modelFields.model,
+                modelSource: modelFields.modelSource,
+                llmError,
                 error: null
             };
         } catch (err) {
@@ -282,6 +334,11 @@ function createCyberPatrolLoop({ acc = null, clock = () => Date.now(), broadcast
                 summary: `Patroli ${kind} berkala gagal dijalankan pada siklus ini: ${String(err && err.message ? err.message : err).slice(0, 120)}`,
                 findings: [],
                 evidence: {},
+                engine: null,
+                provider: null,
+                model: null,
+                modelSource: null,
+                llmError: null,
                 error: "PATROL_CYCLE_FAILED"
             };
         }
@@ -308,6 +365,11 @@ function createCyberPatrolLoop({ acc = null, clock = () => Date.now(), broadcast
         started = true;
         startedAt = clock();
         loadJournal().catch(() => {});
+        // Resolve the patrol model once up front so state() can name it
+        // before the first cycle lands; cycles keep re-resolving.
+        if (llm && typeof llm.resolveTarget === "function") {
+            try { const t = llm.resolveTarget(); if (t) llmState = { provider: t.provider || null, model: t.model || null, modelSource: t.modelSource || null }; } catch { /* cycles retry */ }
+        }
         for (const kind of Object.keys(kinds)) {
             const k = kinds[kind];
             k.nextRunAt = startedAt + k.firstDelayMs;
@@ -341,7 +403,8 @@ function createCyberPatrolLoop({ acc = null, clock = () => Date.now(), broadcast
             mode: started ? "berkala" : "nonaktif",
             startedAt,
             sistem: kindState(kinds.sistem),
-            jaringan: kindState(kinds.jaringan)
+            jaringan: kindState(kinds.jaringan),
+            llm: llmState ? { ...llmState } : null
         };
     }
 
