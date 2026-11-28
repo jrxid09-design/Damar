@@ -152,7 +152,7 @@ function createCorePresence({ sessionDirectory, transport = fetch, endpoint = co
             await Promise.all(want.map(async fid => {
               try { const fr = await get('/api/r9/mata-dewa/feeds/' + fid); if (fr.ok && fr.body?.success === true) mataDewa.feeds[fid] = fr.body.data; } catch {}
             }));
-            try { const pv = await ownerGet('/api/r9/mata-dewa/proactive'); if (pv.ok && pv.body?.success === true) mataDewa.proactive = pv.body.data; } catch {}
+            try { const pv = await ownerGet('/api/r9/mata-dewa/proactive'); if (pv.ok && pv.body?.success === true) mataDewa.proactive = { status: pv.body.data.status, recent: pv.body.data.deliveries || [] }; } catch {}
             // Dated chip for the first location with a scene; the projection
             // re-ships the pixels only when the scene key changes.
             const img0 = mataDewa.feeds.imagery?.results?.[0]?.items?.[0];
