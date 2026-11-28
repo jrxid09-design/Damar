@@ -293,7 +293,20 @@ function createCyberPatrolLoop({ acc = null, clock = () => Date.now(), broadcast
                             assessed = await llm.assess({ kind, evidence: gathered.evidence, target });
                             engine = "llm";
                         } catch (err) {
-                            llmError = String(err && err.message ? err.message : err).slice(0, 80);
+                            // One retry on a bare timeout: provider
+                            // latency on the owner's route is bursty, and
+                            // the cycle has room (in-flight guard, long
+                            // cadence). Any second failure is recorded.
+                            if (err && err.message === "LLM_TIMEOUT") {
+                                try {
+                                    assessed = await llm.assess({ kind, evidence: gathered.evidence, target });
+                                    engine = "llm";
+                                } catch (err2) {
+                                    llmError = String(err2 && err2.message ? err2.message : err2).slice(0, 80);
+                                }
+                            } else {
+                                llmError = String(err && err.message ? err.message : err).slice(0, 80);
+                            }
                         }
                     } else {
                         llmError = target.unavailableReason || "LLM_TIDAK_TERSEDIA";

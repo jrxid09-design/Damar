@@ -121,9 +121,13 @@ function parseAssessment(content) {
  * One LLM patrol assessment: the model judges the gathered evidence.
  * `target` is a resolveWerkudaraPatrolModel() result with an endpoint.
  * Returns { summary, findings }; throws with a short coded reason on any
- * failure (transport, HTTP status, empty or invalid output).
+ * failure (transport, HTTP status, empty or invalid output). The default
+ * timeout is deliberately generous (300 s): the owner's provider route
+ * shows wide latency variance (tens of seconds to over two minutes under
+ * load), and patrol cycles sit 15/30 minutes apart with an in-flight
+ * guard, so a slow judgment costs nothing but patience.
  */
-async function assessPatrolWithLlm({ kind, evidence, target, fetchImpl, timeoutMs = 120_000 } = {}) {
+async function assessPatrolWithLlm({ kind, evidence, target, fetchImpl, timeoutMs = 300_000 } = {}) {
     if (!target || !target.endpoint || !target.model) throw new Error("LLM_TARGET_TIDAK_TERSEDIA");
     const transport = typeof fetchImpl === "function" ? fetchImpl : ((...a) => fetch(...a));
     const url = String(target.endpoint.baseUrl).replace(/\/+$/, "") + "/chat/completions";
@@ -138,7 +142,7 @@ async function assessPatrolWithLlm({ kind, evidence, target, fetchImpl, timeoutM
                     { role: "system", content: SYSTEM_PROMPT },
                     { role: "user", content: `Jenis patroli: ${kind === "sistem" ? "SISTEM" : "JARINGAN"}\nBukti yang dikumpulkan dari host (JSON):\n${JSON.stringify(evidence || {}).slice(0, 6000)}` }
                 ],
-                temperature: 0.2, max_tokens: 800, stream: false
+                temperature: 0.2, max_tokens: 600, stream: false
             })
         });
     } catch (err) {
