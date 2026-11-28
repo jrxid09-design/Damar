@@ -1,7 +1,9 @@
-# This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
+# Fresh-clone gate: proves that a clean clone of Damar can be set up and
+# booted end to end. This replaces the old `npm test` job: the runtime-only
+# tree no longer ships the root tests/ folder, so `npm test` has nothing to
+# run. The gate mirrors the manual fresh-clone check (setup + boot smoke).
 
-name: Node.js CI
+name: Fresh-clone gate
 
 on:
   push:
@@ -10,22 +12,50 @@ on:
     branches: [ "develop" ]
 
 jobs:
-  build:
+  fresh-clone:
 
-    runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        node-version: [18.x, 20.x, 22.x]
-        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+    runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v4
-    - name: Use Node.js ${{ matrix.node-version }}
+
+    - name: Use Node.js 24.x
       uses: actions/setup-node@v4
       with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-    - run: npm ci
-    - run: npm run build --if-present
-    - run: npm test
+        node-version: 24.x
+
+    - name: Setup from a fresh clone
+      shell: pwsh
+      run: |
+        & powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup.ps1 --skip-voice
+        if ($LASTEXITCODE -ne 0) { throw "setup.ps1 failed with exit code $LASTEXITCODE" }
+
+    - name: Boot smoke (wait for the listening banner)
+      shell: pwsh
+      run: |
+        $log = Join-Path $env:RUNNER_TEMP 'damar-boot.log'
+        $err = Join-Path $env:RUNNER_TEMP 'damar-boot.err.log'
+        $proc = Start-Process node -ArgumentList 'src/server.js' -WorkingDirectory $PWD `
+          -RedirectStandardOutput $log -RedirectStandardError $err -PassThru -NoNewWindow
+        try {
+          $deadline = (Get-Date).AddSeconds(120)
+          $ok = $false
+          while ((Get-Date) -lt $deadline) {
+            if ($proc.HasExited) { break }
+            if ((Test-Path $log) -and (Select-String -Path $log -Pattern 'Server listening on http://localhost:' -Quiet)) { $ok = $true; break }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ok) {
+            Get-Content $log -ErrorAction SilentlyContinue
+            Get-Content $err -ErrorAction SilentlyContinue
+            throw 'Server did not reach the listening banner in time.'
+          }
+          Write-Host 'Boot smoke OK: listening banner seen.'
+        } finally {
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+        }
+
+    # EXTENSION POINT (installer mission, INSTALLER-FIRST-RUN-FIXES):
+    # extend this gate to the full first-run flow here — after setup, invoke
+    # the `damar` command and require an answer from the daemon, so the gate
+    # covers clone -> setup -> CLI -> daemon response end to end.
