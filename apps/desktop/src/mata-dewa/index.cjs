@@ -319,14 +319,16 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
   }
   if (p === '/api/r9/mata-dewa/location/gps' && isPost) {
     if (!owner) return json(403, { success: false, error: 'OWNER_REQUIRED' });
-    const b = body || {};
+    if (!body) throw fail('BODY_UNAVAILABLE', 503);
+    const b = await body(req, 2048);
     if (!Number.isFinite(b.lat) || Math.abs(b.lat) > 90 || !Number.isFinite(b.lon) || Math.abs(b.lon) > 180) return json(400, { success: false, error: 'GPS_INVALID' });
     gpsReport = { lat: b.lat, lon: b.lon, at: Number.isFinite(b.at) ? b.at : Date.now(), ...(Number.isFinite(b.radiusKm) ? { radiusKm: Math.min(1000, Math.max(10, b.radiusKm)) } : {}) };
     return json(200, { success: true, data: { recorded: true } });
   }
   if (p === '/api/r9/mata-dewa/watchpoints/resolve' && isPost) {
     if (!owner) return json(403, { success: false, error: 'OWNER_REQUIRED' });
-    const b = body || {};
+    if (!body) throw fail('BODY_UNAVAILABLE', 503);
+    const b = await body(req, 4096);
     const httpGet = async (u) => { const r = await globalThis.fetch(u, { redirect: 'manual', signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined }); let text = ''; if (r.status === 200) text = (await r.text()).slice(0, 1024 * 1024); return { status: r.status, location: r.headers.get('location') || undefined, body: text }; };
     const refArea = (config().areas || [])[0];
     const resolved = await resolvePasteInput(typeof b.input === 'string' ? b.input : '', { httpGet, reference: refArea ? { lat: refArea.lat, lon: refArea.lon } : null });
@@ -335,7 +337,8 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
   }
   if (p === '/api/r9/mata-dewa/watchpoints/import-link' && isPost) {
     if (!owner) return json(403, { success: false, error: 'OWNER_REQUIRED' });
-    const b = body || {};
+    if (!body) throw fail('BODY_UNAVAILABLE', 503);
+    const b = await body(req, 4096);
     const httpGet = async (u) => { const r = await globalThis.fetch(u, { redirect: 'manual', signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined }); let text = ''; if (r.status === 200) text = (await r.text()).slice(0, 1024 * 1024); return { status: r.status, location: r.headers.get('location') || undefined, body: text }; };
     const resolved = await resolveMapsLink(typeof b.url === 'string' ? b.url : '', { httpGet });
     if (!resolved.ok) return json(400, { success: false, error: resolved.error });
