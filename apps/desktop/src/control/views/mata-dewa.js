@@ -27,7 +27,7 @@
       importLink: 'Import from a Google Maps link', importBtn: 'Import', importHint: 'A pin or coordinate link adds one point; a shared My Maps link adds every placemark as a point.',
       alertsTitle: 'Proactive alerts', alertEnabled: 'Alerts on', tickMinutes: 'Check every (min)', quietHours: 'Quiet hours', gpsEnabled: 'Use mobile GPS', imageryAlertsOpt: 'Satellite imagery observations',
       channels: 'Channels', chNotch: 'Notch', deliveries: 'Recent deliveries', checkNow: 'Check now', lastTick: 'Last check', noDeliveries: 'No alerts delivered yet.',
-      quakeMin: 'Quake min. magnitude', quakeRadius: 'Quake radius (km)', stormRain: 'Storm rain (mm/h)', stormWind: 'Storm wind (km/h)', chatId: 'Telegram chat ID', waPhone: 'WhatsApp phone number ID', waTo: 'WhatsApp destination',
+      quakeMin: 'Quake min. magnitude', quakeRadius: 'Quake radius (km)', quakeAge: 'Quake max age (h)', stormRain: 'Storm rain (mm/h)', stormWind: 'Storm wind (km/h)', chatId: 'Telegram chat ID', waPhone: 'WhatsApp phone number ID', waTo: 'WhatsApp destination',
       cloud: 'cloud', passDate: 'Pass', notLive: 'Dated satellite pass, not a live view.', noScenes: 'No dated pass found for the configured locations yet.' },
     id: { subtitle: 'Umpan dunia publik, gempa, siklon, cuaca, kualitas udara, pesawat, kapal, kebakaran, satelit dan peluncuran, serta kamera Anda sendiri.',
       consentTitle: 'Persetujuan & pengungkapan koneksi keluar', consentOn: 'Saya setuju, aktifkan umpan publik', consentOff: 'Cabut persetujuan (hentikan semua umpan)', hosts: 'Host',
@@ -43,7 +43,7 @@
       importLink: 'Impor dari tautan Google Maps', importBtn: 'Impor', importHint: 'Tautan pin atau koordinat menambah satu titik; tautan My Maps yang dibagikan menambah setiap penanda sebagai titik.',
       alertsTitle: 'Peringatan proaktif', alertEnabled: 'Peringatan aktif', tickMinutes: 'Periksa tiap (menit)', quietHours: 'Jam tenang', gpsEnabled: 'Pakai GPS ponsel', imageryAlertsOpt: 'Observasi citra satelit',
       channels: 'Saluran', chNotch: 'Notch', deliveries: 'Pengiriman terakhir', checkNow: 'Periksa sekarang', lastTick: 'Pemeriksaan terakhir', noDeliveries: 'Belum ada peringatan terkirim.',
-      quakeMin: 'Magnitudo gempa min.', quakeRadius: 'Radius gempa (km)', stormRain: 'Hujan badai (mm/jam)', stormWind: 'Angin badai (km/jam)', chatId: 'ID chat Telegram', waPhone: 'ID nomor WhatsApp', waTo: 'Tujuan WhatsApp',
+      quakeMin: 'Magnitudo gempa min.', quakeRadius: 'Radius gempa (km)', quakeAge: 'Usia gempa maks. (jam)', stormRain: 'Hujan badai (mm/jam)', stormWind: 'Angin badai (km/jam)', chatId: 'ID chat Telegram', waPhone: 'ID nomor WhatsApp', waTo: 'Tujuan WhatsApp',
       cloud: 'awan', passDate: 'Lintasan', notLive: 'Citra satelit bertanggal, bukan pantauan langsung.', noScenes: 'Belum ada lintasan bertanggal untuk lokasi yang diatur.' }
   };
   function T(k) { return (STR[md.lang] && STR[md.lang][k]) || STR.en[k] || k; }
@@ -63,7 +63,7 @@
       if (owner()) {
         jobs.push(H.get('/api/r9/mata-dewa/cameras').then(function (x) { md.own = x.ok ? x.data.own : []; }));
         jobs.push(H.get('/api/r9/mata-dewa/alpr').then(function (x) { md.alpr = x.ok ? x.data : null; }));
-        jobs.push(H.get('/api/r9/mata-dewa/proactive').then(function (x) { md.proactive = x.ok ? x.data : null; }));
+        jobs.push(H.get('/api/r9/mata-dewa/proactive').then(function (x) { md.proactive = x.ok ? { status: x.data.status, recent: x.data.deliveries || [] } : null; }));
       }
       return Promise.all(jobs);
     }).then(function () { md.loading = false; H.refresh(); }, function () { md.loading = false; });
@@ -241,7 +241,7 @@
     return H.panel(T('alertsTitle'),
       '<div style="display:flex;flex-direction:column;gap:10px;padding:12px;font-size:12px;">' +
       '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;">' + bool('data-md-alert-bool="enabled"', T('alertEnabled'), a.enabled) + bool('data-md-alert-bool="imageryAlerts"', T('imageryAlertsOpt'), a.imageryAlerts) + bool('data-md-alert-bool="gpsEnabled"', T('gpsEnabled'), a.gpsEnabled) +
-      num('data-md-alert-num="tickMinutes"', T('tickMinutes'), a.tickMinutes, 1, 60) + num('data-md-alert-num="quakeMinMagnitude"', T('quakeMin'), a.quakeMinMagnitude, 0, 10) + num('data-md-alert-num="quakeRadiusKm"', T('quakeRadius'), a.quakeRadiusKm, 10, 2000) +
+      num('data-md-alert-num="tickMinutes"', T('tickMinutes'), a.tickMinutes, 1, 60) + num('data-md-alert-num="quakeMinMagnitude"', T('quakeMin'), a.quakeMinMagnitude, 0, 10) + num('data-md-alert-num="quakeRadiusKm"', T('quakeRadius'), a.quakeRadiusKm, 10, 2000) + num('data-md-alert-num="quakeMaxAgeHours"', T('quakeAge'), a.quakeMaxAgeHours, 1, 168) +
       num('data-md-alert-num="stormPrecipMm"', T('stormRain'), a.stormPrecipMm, 0, 200) + num('data-md-alert-num="stormWindKmh"', T('stormWind'), a.stormWindKmh, 10, 300) + '</div>' +
       '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;"><span style="font-weight:600;">' + esc(T('quietHours')) + '</span>' +
       '<input class="input-field" type="time" data-md-alert-qh="start" value="' + H.escapeHtml(qh.start || '22:00') + '" style="width:auto;" /><input class="input-field" type="time" data-md-alert-qh="end" value="' + H.escapeHtml(qh.end || '06:00') + '" style="width:auto;" />' +
@@ -342,7 +342,7 @@
     'add-point': function () { var d = md.draft; if (!d || d.watchPoints.length >= 200) return; var n = 1; while (d.watchPoints.some(function (w) { return w.id === 'titik-' + n; })) n++; d.watchPoints.push({ id: 'titik-' + n, name: 'Titik ' + n, lat: 0, lon: 0, radiusKm: 25, profile: 'asset' }); H.refresh(); },
     'remove-point': function (b) { if (md.draft) { md.draft.watchPoints.splice(+b.getAttribute('data-i'), 1); H.refresh(); } },
     'import-link': function () { var url = md.importUrl; if (!url) return; H.post('/api/r9/mata-dewa/watchpoints/import-link', { url: url, profile: md.importProfile }).then(function (r) { if (r.ok) { md.importUrl = ''; md.draft = null; } after(r, r.ok ? 'Imported ' + (r.data && r.data.added) + ' point(s).' : ''); }); },
-    'check-now': function () { H.post('/api/r9/mata-dewa/proactive', { action: 'tick' }).then(function (r) { md.proactive = r.ok ? { status: r.data.status, recent: r.data.recent } : md.proactive; after(r, 'OK'); }); },
+    'check-now': function () { H.post('/api/r9/mata-dewa/proactive', { action: 'tick' }).then(function (r) { if (r.ok) return H.get('/api/r9/mata-dewa/proactive').then(function (x) { if (x.ok) md.proactive = { status: x.data.status, recent: x.data.deliveries || [] }; }); }).then(function () { md.lastLoad = 0; H.refresh(); }); },
     'discard': function () { md.draft = null; md.message = ''; H.refresh(); },
     'save': function () { if (md.draft) saveSettings(md.draft); }
   };

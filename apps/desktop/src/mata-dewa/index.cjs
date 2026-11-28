@@ -179,7 +179,7 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
   async function handle(req, res, url, json, { who = 'requester', body = null } = {}) {
     const p = url.pathname, owner = who === 'owner', cfg = config();
     // keys/<feed>: POST only. cameras, alpr: GET (read) or POST (Owner change). Everything else: GET only.
-    const allowed = /^\/api\/r9\/mata-dewa\/keys\/[A-Za-z]{1,24}$/.test(p) ? ['POST'] : /^\/api\/r9\/mata-dewa\/(cameras|alpr)$/.test(p) ? ['GET', 'POST'] : ['GET'];
+    const allowed = /^\/api\/r9\/mata-dewa\/keys\/[A-Za-z]{1,24}$/.test(p) ? ['POST'] : /^\/api\/r9\/mata-dewa\/(cameras|alpr|proactive|location\/gps|watchpoints\/import-link)$/.test(p) ? ['GET', 'POST'] : ['GET'];
     const isPost = req.method === 'POST';
     // Only the public camera list takes a query (?q=<text>&page=<n>, server-side search + pagination).
     const listRoute = /^\/api\/r9\/mata-dewa\/cameras\/public\/[a-z-]{1,24}$/.test(p);
@@ -229,42 +229,42 @@ function createMataDewa({ settings, fetch = egress.fetchPublic, ws = wsWindow, n
         ownerOnly(); if (!cfg.cctvNoticeAt) throw fail('CCTV_NOTICE_REQUIRED', 409);
         const buf = await cameras.ownSnapshot(m[1]); return m[2] === 'frame' ? frame(json, buf) : sendJpeg(res, buf);
       }
+      if (p === '/api/r9/mata-dewa/proactive') {
+    if (!owner) return json(403, { success: false, error: 'OWNER_REQUIRED' });
+    if (isPost) { const summary = await proactive.tick('manual'); return json(200, { success: true, data: { summary } }); }
+    return json(200, { success: true, data: { status: proactive.status(), deliveries: proactive.recentDeliveries(50) } });
+  }
+  if (p === '/api/r9/mata-dewa/location/gps' && isPost) {
+    if (!owner) return json(403, { success: false, error: 'OWNER_REQUIRED' });
+    const b = body || {};
+    if (!Number.isFinite(b.lat) || Math.abs(b.lat) > 90 || !Number.isFinite(b.lon) || Math.abs(b.lon) > 180) return json(400, { success: false, error: 'GPS_INVALID' });
+    gpsReport = { lat: b.lat, lon: b.lon, at: Number.isFinite(b.at) ? b.at : Date.now(), ...(Number.isFinite(b.radiusKm) ? { radiusKm: Math.min(1000, Math.max(10, b.radiusKm)) } : {}) };
+    return json(200, { success: true, data: { recorded: true } });
+  }
+  if (p === '/api/r9/mata-dewa/watchpoints/import-link' && isPost) {
+    if (!owner) return json(403, { success: false, error: 'OWNER_REQUIRED' });
+    const b = body || {};
+    const httpGet = async (u) => { const r = await globalThis.fetch(u, { redirect: 'manual', signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined }); let text = ''; if (r.status === 200) text = (await r.text()).slice(0, 1024 * 1024); return { status: r.status, location: r.headers.get('location') || undefined, body: text }; };
+    const resolved = await resolveMapsLink(typeof b.url === 'string' ? b.url : '', { httpGet });
+    if (!resolved.ok) return json(400, { success: false, error: resolved.error });
+    const profile = b.profile === 'personal' ? 'personal' : 'asset';
+    const cleanName = (n) => { const c = String(n || '').replace(/[^\p{L}\p{N} .,'()_-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 40); return c || 'Titik pantau'; };
+    const cur = [...(config().watchPoints || [])];
+    let imported = 0, skipped = 0;
+    for (const pt of resolved.points) {
+      if (cur.length >= 200) { skipped++; continue; }
+      if (cur.some(w => Math.abs(w.lat - pt.lat) < 0.0001 && Math.abs(w.lon - pt.lon) < 0.0001)) { skipped++; continue; }
+      const name = cleanName(pt.name);
+      let id = 'wp-' + (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 18) || 'point'); let n = 2;
+      while (cur.some(w => w.id === id)) id = 'wp-' + (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 15) || 'point') + '-' + (n++);
+      cur.push({ id, name, lat: pt.lat, lon: pt.lon, radiusKm: profile === 'asset' ? 50 : 25, profile, sourceUrl: resolved.sourceUrl });
+      imported++;
+    }
+    if (imported) { if (typeof settings.update === 'function') settings.update({ mataDewa: { watchPoints: cur } }); else if (typeof settings.set === 'function') settings.set({ watchPoints: cur }); else return json(501, { success: false, error: 'SETTINGS_READ_ONLY' }); }
+    return json(200, { success: true, data: { kind: resolved.kind, mapTitle: resolved.mapTitle || null, imported, skipped, total: cur.length } });
+  }
       if (p.startsWith('/api/r9/mata-dewa/alpr')) {
         ownerOnly(); alpr.schedule();
-        if (p === '/api/r9/mata-dewa/proactive') {
-      if (!owner) return json(403, { success: false, error: 'OWNER_REQUIRED' });
-      if (isPost) { const summary = await proactive.tick('manual'); return json(200, { success: true, data: { summary } }); }
-      return json(200, { success: true, data: { status: proactive.status(), deliveries: proactive.recentDeliveries(50) } });
-    }
-    if (p === '/api/r9/mata-dewa/location/gps' && isPost) {
-      if (!owner) return json(403, { success: false, error: 'OWNER_REQUIRED' });
-      const b = body || {};
-      if (!Number.isFinite(b.lat) || Math.abs(b.lat) > 90 || !Number.isFinite(b.lon) || Math.abs(b.lon) > 180) return json(400, { success: false, error: 'GPS_INVALID' });
-      gpsReport = { lat: b.lat, lon: b.lon, at: Number.isFinite(b.at) ? b.at : Date.now(), ...(Number.isFinite(b.radiusKm) ? { radiusKm: Math.min(1000, Math.max(10, b.radiusKm)) } : {}) };
-      return json(200, { success: true, data: { recorded: true } });
-    }
-    if (p === '/api/r9/mata-dewa/watchpoints/import-link' && isPost) {
-      if (!owner) return json(403, { success: false, error: 'OWNER_REQUIRED' });
-      const b = body || {};
-      const httpGet = async (u) => { const r = await globalThis.fetch(u, { redirect: 'manual', signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined }); let text = ''; if (r.status === 200) text = (await r.text()).slice(0, 1024 * 1024); return { status: r.status, location: r.headers.get('location') || undefined, body: text }; };
-      const resolved = await resolveMapsLink(typeof b.url === 'string' ? b.url : '', { httpGet });
-      if (!resolved.ok) return json(400, { success: false, error: resolved.error });
-      const profile = b.profile === 'personal' ? 'personal' : 'asset';
-      const cleanName = (n) => { const c = String(n || '').replace(/[^\p{L}\p{N} .,'()_-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 40); return c || 'Titik pantau'; };
-      const cur = [...(config().watchPoints || [])];
-      let imported = 0, skipped = 0;
-      for (const pt of resolved.points) {
-        if (cur.length >= 200) { skipped++; continue; }
-        if (cur.some(w => Math.abs(w.lat - pt.lat) < 0.0001 && Math.abs(w.lon - pt.lon) < 0.0001)) { skipped++; continue; }
-        const name = cleanName(pt.name);
-        let id = 'wp-' + (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 18) || 'point'); let n = 2;
-        while (cur.some(w => w.id === id)) id = 'wp-' + (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 15) || 'point') + '-' + (n++);
-        cur.push({ id, name, lat: pt.lat, lon: pt.lon, radiusKm: profile === 'asset' ? 50 : 25, profile, sourceUrl: resolved.sourceUrl });
-        imported++;
-      }
-      if (imported) { if (typeof settings.update === 'function') settings.update({ mataDewa: { watchPoints: cur } }); else if (typeof settings.set === 'function') settings.set({ watchPoints: cur }); else return json(501, { success: false, error: 'SETTINGS_READ_ONLY' }); }
-      return json(200, { success: true, data: { kind: resolved.kind, mapTitle: resolved.mapTitle || null, imported, skipped, total: cur.length } });
-    }
     if (p === '/api/r9/mata-dewa/alpr' && !isPost) return json(200, { success: true, data: { status: alpr.status(), entries: alpr.entries(), watchlist: alpr.watchlist(), alerts: alpr.alerts().slice(0, 100) } });
         if (p === '/api/r9/mata-dewa/alpr') {
           const input = await body(req, 2048);
