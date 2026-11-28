@@ -409,7 +409,13 @@ async function main() {
     console.log("setup: fase 3 — dependensi aplikasi + perintah `damar`");
     if (!fs.existsSync(path.join(ROOT, "node_modules"))) { runNpm(["install"]); action("dependensi aplikasi terpasang (npm install)"); }
     else console.log("  dependensi sudah ada (node_modules) — dilewati");
-    const prefix = out(node.npm, ["prefix", "-g"], { env: npmEnv }).text.split(/\r?\n/)[0];
+    // Windows: `out` hanya menyalakan shell untuk .cmd/.bat, jadi "npm"
+    // polos (Node sistem) tanpa shell gagal ENOENT dan prefix terbaca
+    // kosong — akibatnya registerGlobalCommand melewati seluruh logika
+    // idempotensinya dan `npm link` mentah gagal EEXIST pada pemasangan
+    // ulang. Pakai npm.cmd agar prefix benar-benar terbaca.
+    const npmCmd = node.npm === "npm" ? "npm.cmd" : node.npm;
+    const prefix = out(npmCmd, ["prefix", "-g"], { env: npmEnv }).text.split(/\r?\n/)[0];
     registerGlobalCommand(runNpm, prefix);
     if (prefix && fs.existsSync(prefix)) ensureOnUserPath(prefix);
 
